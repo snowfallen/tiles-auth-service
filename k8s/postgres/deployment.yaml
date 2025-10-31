@@ -1,0 +1,135 @@
+# PostgreSQL Deployment для Auth Service
+# Single instance PostgreSQL (NOT HA)
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: auth-postgres
+  namespace: tiles-infra
+  labels:
+    app: auth-postgres
+    component: database
+spec:
+  # Single replica (для HA використовуй StatefulSet + Patroni)
+  replicas: 1
+
+  # Recreate strategy (NOT RollingUpdate для stateful)
+  strategy:
+    type: Recreate
+
+  selector:
+    matchLabels:
+      app: auth-postgres
+
+  template:
+    metadata:
+      labels:
+        app: auth-postgres
+        component: database
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+
+          ports:
+            - containerPort: 5432
+              name: postgres
+              protocol: TCP
+
+          # Environment variables
+          env:
+            - name: POSTGRES_DB
+              valueFrom:
+                configMapKeyRef:
+                  name: auth-postgres-config
+                  key: POSTGRES_DB
+
+            - name: POSTGRES_USER
+              valueFrom:
+                configMapKeyRef:
+                  name: auth-postgres-config
+                  key: POSTGRES_USER
+
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: auth-postgres-secret
+                  key: POSTGRES_PASSWORD
+
+            # Data directory
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+
+          # Volume mounts
+          volumeMounts:
+            - name: postgres-storage
+              mountPath: /var/lib/postgresql/data
+
+          # Resource limits
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "250m"
+            limits:
+              memory: "1Gi"
+              cpu: "1000m"
+
+          # Liveness probe
+          livenessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - auth_user
+                - -d
+                - auth_db
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          # Readiness probe
+          readinessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - auth_user
+                - -d
+                - auth_db
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+
+      volumes:
+        - name: postgres-storage
+          persistentVolumeClaim:
+            claimName: auth-postgres-pvc
+
+---
+# PostgreSQL Service
+# Provides stable network endpoint
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: auth-postgres
+  namespace: tiles-infra
+  labels:
+    app: auth-postgres
+    component: database
+spec:
+  type: ClusterIP
+
+  selector:
+    app: auth-postgres
+
+  ports:
+    - port: 5432
+      targetPort: 5432
+      protocol: TCP
+      name: postgres
+
+  # Sticky sessions не потрібні (single replica)
+  # sessionAffinity: None

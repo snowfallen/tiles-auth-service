@@ -1,0 +1,33 @@
+databaseChangeLog:
+  - changeSet:
+      id: 002-create-roles-table
+      author: snowfallen
+      comment: Create roles table for user permissions
+      changes:
+        - createTable:
+            tableName: roles
+            columns:
+              - column:
+                  name: id
+                  type: BIGSERIAL
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+
+              - column:
+                  name: name
+                  type: VARCHAR(50)
+                  constraints:
+                    unique: true
+                    nullable: false
+
+        - createIndex:
+            indexName: idx_roles_name
+            tableName: roles
+            columns:
+              - column:
+                  name: name
+
+      rollback:
+        - dropTable:
+            tableName: roles

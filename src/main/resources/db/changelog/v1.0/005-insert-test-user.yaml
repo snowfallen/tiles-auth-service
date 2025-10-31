@@ -1,0 +1,54 @@
+databaseChangeLog:
+  - changeSet:
+      id: 005-insert-test-user
+      author: snowfallen
+      comment: Insert test admin user (username=admin, password=password123)
+      changes:
+        # Insert admin user
+        # Password hash для "password123" через BCrypt
+        - insert:
+            tableName: users
+            columns:
+              - column:
+                  name: username
+                  value: admin
+              - column:
+                  name: email
+                  value: admin@tiles.local
+              - column:
+                  name: password_hash
+                  value: $2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy
+              - column:
+                  name: enabled
+                  valueBoolean: true
+              - column:
+                  name: account_non_expired
+                  valueBoolean: true
+              - column:
+                  name: account_non_locked
+                  valueBoolean: true
+              - column:
+                  name: credentials_non_expired
+                  valueBoolean: true
+
+        # Assign USER role to admin
+        - sql:
+            sql: >
+              INSERT INTO user_roles (user_id, role_id)
+              SELECT u.id, r.id
+              FROM users u, roles r
+              WHERE u.username = 'admin' AND r.name = 'USER'
+
+        # Assign ADMIN role to admin
+        - sql:
+            sql: >
+              INSERT INTO user_roles (user_id, role_id)
+              SELECT u.id, r.id
+              FROM users u, roles r
+              WHERE u.username = 'admin' AND r.name = 'ADMIN'
+
+      rollback:
+        - sql:
+            sql: DELETE FROM user_roles WHERE user_id = (SELECT id FROM users WHERE username = 'admin')
+        - sql:
+            sql: DELETE FROM users WHERE username = 'admin'

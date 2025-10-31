@@ -1,0 +1,25 @@
+# PostgreSQL PersistentVolumeClaim
+# Persistent storage для Auth Service database
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: auth-postgres-pvc
+  namespace: tiles-infra
+  labels:
+    app: auth-postgres
+    component: database
+spec:
+  # Access mode
+  accessModes:
+    - ReadWriteOnce  # Single node can mount read-write
+
+  # Storage request
+  resources:
+    requests:
+      storage: 5Gi  # 5GB для auth database
+
+  # StorageClass (optional, uses default)
+  # В Kind: local-path provisioner
+  # В cloud: gp3, standard-rwo, тощо
+  # storageClassName: standard

@@ -1,0 +1,33 @@
+# PostgreSQL ConfigMap
+# Non-sensitive configuration для Auth Service PostgreSQL
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: auth-postgres-config
+  namespace: tiles-infra
+  labels:
+    app: auth-postgres
+    component: database
+data:
+  # Database name
+  POSTGRES_DB: auth_db
+
+  # Database user
+  POSTGRES_USER: auth_user
+
+  # PostgreSQL performance tuning
+  # These values suitable для small/medium workloads
+  max_connections: "100"
+  shared_buffers: "128MB"
+  effective_cache_size: "256MB"
+  work_mem: "4MB"
+  maintenance_work_mem: "64MB"
+
+  # Logging
+  log_statement: "none"  # Don't log statements (performance)
+  log_duration: "off"
+
+  # Autovacuum (важливо для PostgreSQL health)
+  autovacuum: "on"
+  autovacuum_max_workers: "3"

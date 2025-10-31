@@ -1,0 +1,54 @@
+# Redis ConfigMap
+# Configuration для Auth Service Redis
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: auth-redis-config
+  namespace: tiles-infra
+  labels:
+    app: auth-redis
+    component: cache
+data:
+  # Redis configuration file
+  redis.conf: |
+    # Network
+    bind 0.0.0.0
+    protected-mode yes
+    port 6379
+    tcp-backlog 511
+    timeout 0
+    tcp-keepalive 300
+    
+    # General
+    daemonize no
+    pidfile /var/run/redis_6379.pid
+    loglevel notice
+    logfile ""
+    databases 16
+    
+    # Snapshotting (RDB persistence)
+    save 900 1      # Save if 1 key changed in 15 min
+    save 300 10     # Save if 10 keys changed in 5 min
+    save 60 10000   # Save if 10000 keys changed in 1 min
+    
+    stop-writes-on-bgsave-error yes
+    rdbcompression yes
+    rdbchecksum yes
+    dbfilename dump.rdb
+    dir /data
+    
+    # Memory management
+    maxmemory 256mb
+    maxmemory-policy allkeys-lru  # Evict least recently used
+    
+    # Append Only File (disabled для performance)
+    appendonly no
+    
+    # Slow log
+    slowlog-log-slower-than 10000  # 10ms
+    slowlog-max-len 128
+    
+    # Security
+    # Password встановлюється через command line
+    # requirepass не вказуємо тут (plaintext)

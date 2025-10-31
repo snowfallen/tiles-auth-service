@@ -1,0 +1,24 @@
+databaseChangeLog:
+  - changeSet:
+      id: 004-insert-default-roles
+      author: snowfallen
+      comment: Insert default roles (USER, ADMIN)
+      changes:
+        - insert:
+            tableName: roles
+            columns:
+              - column:
+                  name: name
+                  value: USER
+
+        - insert:
+            tableName: roles
+            columns:
+              - column:
+                  name: name
+                  value: ADMIN
+
+      rollback:
+        - delete:
+            tableName: roles
+            where: name IN ('USER', 'ADMIN')

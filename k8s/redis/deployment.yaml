@@ -1,0 +1,131 @@
+# Redis Deployment для Auth Service
+# Single instance Redis
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: auth-redis
+  namespace: tiles-infra
+  labels:
+    app: auth-redis
+    component: cache
+spec:
+  replicas: 1
+
+  strategy:
+    type: Recreate
+
+  selector:
+    matchLabels:
+      app: auth-redis
+
+  template:
+    metadata:
+      labels:
+        app: auth-redis
+        component: cache
+    spec:
+      containers:
+        - name: redis
+          image: redis:7-alpine
+
+          # Command з password
+          command:
+            - redis-server
+            - /usr/local/etc/redis/redis.conf
+            - --requirepass
+            - $(REDIS_PASSWORD)
+
+          ports:
+            - containerPort: 6379
+              name: redis
+              protocol: TCP
+
+          # Environment variables
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: auth-redis-secret
+                  key: REDIS_PASSWORD
+
+          # Volume mounts
+          volumeMounts:
+            # Config file
+            - name: redis-config
+              mountPath: /usr/local/etc/redis
+              readOnly: true
+
+            # Data directory
+            - name: redis-data
+              mountPath: /data
+
+          # Resource limits
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"  # Matches maxmemory в config
+              cpu: "500m"
+
+          # Liveness probe
+          livenessProbe:
+            exec:
+              command:
+                - redis-cli
+                - -a
+                - $(REDIS_PASSWORD)
+                - ping
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          # Readiness probe
+          readinessProbe:
+            exec:
+              command:
+                - redis-cli
+                - -a
+                - $(REDIS_PASSWORD)
+                - ping
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+
+      volumes:
+        # ConfigMap з redis.conf
+        - name: redis-config
+          configMap:
+            name: auth-redis-config
+
+        # Data volume
+        # emptyDir для dev (втрачається при Pod restart)
+        # Для production використовуй PVC
+        - name: redis-data
+          emptyDir: {}
+
+---
+# Redis Service
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: auth-redis
+  namespace: tiles-infra
+  labels:
+    app: auth-redis
+    component: cache
+spec:
+  type: ClusterIP
+
+  selector:
+    app: auth-redis
+
+  ports:
+    - port: 6379
+      targetPort: 6379
+      protocol: TCP
+      name: redis
