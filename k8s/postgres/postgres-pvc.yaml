@@ -1,25 +1,755 @@
-# PostgreSQL PersistentVolumeClaim
-# Persistent storage для Auth Service database
+# ════════════════════════════════════════════════════════════════
+# POSTGRESQL PERSISTENT VOLUME CLAIM
+# ════════════════════════════════════════════════════════════════
+#
+# Storage request для PostgreSQL data
+#
+# KUBERNETES STORAGE:
+# ══════════════════
+#
+# Three layers:
+# 1. PersistentVolume (PV) - Actual storage (disk)
+# 2. PersistentVolumeClaim (PVC) - Storage request (this)
+# 3. Pod - Uses PVC (mounts storage)
+#
+# Workflow:
+# ════════
+# 1. Admin creates PV (або dynamic provisioner)
+#    PV = actual disk (100Gi SSD)
+#
+# 2. User creates PVC (this file)
+#    PVC = "I need 5Gi storage"
+#
+# 3. Kubernetes binds PVC → PV
+#    PVC → PV (5Gi від 100Gi PV)
+#
+# 4. Pod mounts PVC
+#    Pod → PVC → PV → Disk
+#
+# 5. Data written to disk
+#    PostgreSQL → /var/lib/postgresql/data → PVC → PV → Physical disk
+#
+# Analogy:
+# PV = Hotel (physical building)
+# PVC = Room reservation (request для space)
+# Pod = Guest (uses reserved room)
 
 apiVersion: v1
 kind: PersistentVolumeClaim
+# ═══════════════════════════
+# PersistentVolumeClaim
+# ═══════════════════════════
+#
+# Storage request resource
+#
+# vs PersistentVolume:
+# PV: Actual storage (admin creates)
+# PVC: Storage request (user creates)
+#
+# Dynamic provisioning:
+# - No manual PV creation
+# - StorageClass creates PV automatically
+# - PVC → StorageClass → PV (automatic)
+#
+# Static provisioning:
+# - Admin creates PV manually
+# - PVC binds to existing PV
+# - PVC → PV (manual matching)
+
 metadata:
   name: auth-postgres-pvc
+  # ═══════════════════════════════════
+  # PVC Name
+  # ═══════════════════════════════════
+  #
+  # Referenced в Deployment:
+  # volumes:
+  #   - name: postgres-storage
+  #     persistentVolumeClaim:
+  #       claimName: auth-postgres-pvc  ← This
+  #
+  # Naming conventions:
+  # ✅ service-component-pvc
+  # ✅ auth-postgres-pvc (this)
+  # ✅ user-service-data-pvc
+  # ✅ analytics-db-pvc
+
   namespace: tiles-infra
+  # Same namespace як Deployment
+  #
+  # PVC і Pod must be в same namespace
+  # Cannot mount PVC від different namespace
+
   labels:
     app: auth-postgres
     component: database
+    # Labels для organization
+    # Not used для binding (size/accessMode matter)
+
 spec:
-  # Access mode
   accessModes:
-    - ReadWriteOnce  # Single node can mount read-write
+    # ════════════════════════════════════════════════════
+    # ACCESS MODES
+    # ════════════════════════════════════════════════════
+    #
+    # How volume can be mounted
+    #
+    # Three modes:
+    # ═══════════
+    #
+    # ReadWriteOnce (RWO) - this one:
+    # ✅ Single node, read-write
+    # ✅ Multiple pods (same node) can mount
+    # ❌ Cannot mount від different nodes
+    # ✅ Most common (databases)
+    #
+    # ReadOnlyMany (ROX):
+    # ✅ Multiple nodes, read-only
+    # ❌ No writes allowed
+    # ✅ Shared static content (images, configs)
+    #
+    # ReadWriteMany (RWX):
+    # ✅ Multiple nodes, read-write
+    # ✅ Shared writable storage
+    # ⚠️  Requires special storage (NFS, CephFS, GlusterFS)
+    # ⚠️  Not all providers support
+    # ✅ Use cases: Shared uploads, logs
+    #
+    # VOLUME ACCESS MATRIX:
+    # ════════════════════
+    #
+    # Storage Type       | RWO | ROX | RWX
+    # -------------------|-----|-----|-----
+    # Local (hostPath)   | ✅  | ✅  | ❌
+    # EBS (AWS)          | ✅  | ✅  | ❌
+    # GCE PD (Google)    | ✅  | ✅  | ❌
+    # Azure Disk         | ✅  | ❌  | ❌
+    # NFS                | ✅  | ✅  | ✅
+    # CephFS             | ✅  | ✅  | ✅
+    # GlusterFS          | ✅  | ✅  | ✅
+    #
+    # WHY ReadWriteOnce:
+    # ═════════════════
+    #
+    # PostgreSQL requirements:
+    # - Single writer (data integrity)
+    # - Cannot share PVC між nodes safely
+    # - Data corruption if multiple writers
+    #
+    # Deployment strategy (Recreate):
+    # - Stops old pod (releases PVC)
+    # - Starts new pod (mounts PVC)
+    # - Only one pod at a time
+    # - RWO sufficient
+    #
+    # If RWX needed (not для database):
+    # - Multiple pods writing
+    # - Different nodes
+    # - Shared storage backend
+    # - Example: File upload service
+    #
+    # KIND NOTES:
+    # ══════════
+    # Kind uses local-path provisioner
+    # - Creates hostPath PV (node's disk)
+    # - Supports: RWO only
+    # - Location: /var/local-path-provisioner/
+    #
+    # Multi-node Kind:
+    # - PVC binds to one node
+    # - Pod must schedule on same node
+    # - Not truly portable (tied to node)
+    #
+    # Cloud providers:
+    # - AWS EBS: RWO (block storage, single attach)
+    # - Google PD: RWO (persistent disk)
+    # - Azure Disk: RWO (managed disk)
+    #
+    # MULTIPLE PODS (same node):
+    # ═════════════════════════
+    # RWO allows multiple pods IF same node:
+    #
+    # Node 1:
+    # ├── Pod A → PVC (RWO) → PV ✅
+    # └── Pod B → Same PVC → Same PV ✅
+    #
+    # Node 1: Pod A → PVC (RWO) → PV ✅
+    # Node 2: Pod B → Same PVC → ❌ FAILS
+    #
+    # PostgreSQL:
+    # - Single replica (Recreate strategy)
+    # - One pod at a time
+    # - RWO perfect fit
 
-  # Storage request
+    - ReadWriteOnce
+      # ═══════════════════════════════
+      # Single node, read-write
+      # ═══════════════════════════════
+      #
+      # Access mode: RWO
+      #
+      # Behavior:
+      # - PVC can be mounted на one node
+      # - Multiple pods на that node OK
+      # - Different nodes ❌
+      #
+      # Matching PV:
+      # PV must support ReadWriteOnce:
+      # apiVersion: v1
+      # kind: PersistentVolume
+      # spec:
+      #   accessModes:
+      #     - ReadWriteOnce  ← Must match
+      #
+      # Binding:
+      # PVC → Finds PV з matching accessMode
+      #
+      # If no matching PV:
+      # PVC stuck в Pending state
+    # Event: "no persistent volumes available"
+
   resources:
-    requests:
-      storage: 5Gi  # 5GB для auth database
+    # ════════════════════════════════════════════════════
+    # STORAGE RESOURCES
+    # ════════════════════════════════════════════════════
+    #
+    # How much storage requested
 
-  # StorageClass (optional, uses default)
-  # В Kind: local-path provisioner
-  # В cloud: gp3, standard-rwo, тощо
-  # storageClassName: standard
+    requests:
+      storage: 5Gi
+      # ═══════════════════════════════════════════════
+      # STORAGE REQUEST
+      # ═══════════════════════════════════════════════
+      #
+      # Amount of storage needed: 5GiB
+      #
+      # Units:
+      # ═════
+      # Binary (base-2, IEC):
+      # - Ki = 1024 bytes (KiB)
+      # - Mi = 1024 Ki = 1,048,576 bytes (MiB)
+      # - Gi = 1024 Mi = 1,073,741,824 bytes (GiB)
+      #
+      # Decimal (base-10, SI):
+      # - k = 1000 bytes (kB)
+      # - M = 1000 k = 1,000,000 bytes (MB)
+      # - G = 1000 M = 1,000,000,000 bytes (GB)
+      #
+      # Difference:
+      # 5Gi = 5,368,709,120 bytes (binary)
+      # 5G  = 5,000,000,000 bytes (decimal)
+      # Difference: ~368MB (7% larger)
+      #
+      # Kubernetes convention: Binary (Gi, Mi, Ki)
+      # Disk manufacturers: Decimal (GB, TB)
+      #
+      # Examples:
+      # ✅ 5Gi (5 gibibytes)
+      # ✅ 100Mi (100 mebibytes)
+      # ✅ 1Ti (1 tebibyte)
+      # ❌ 5GB (avoid, ambiguous)
+      # ❌ 5gb (case matters!)
+      #
+      # SIZING:
+      # ══════
+      #
+      # Database size estimation:
+      # 1. Tables data
+      # 2. Indexes (typically 50-100% of data)
+      # 3. WAL logs (Write-Ahead Log)
+      # 4. Temporary files
+      # 5. Growth buffer (3-6 months)
+      #
+      # Our calculation:
+      # ═══════════════
+      # Auth Service tables:
+      # - users: ~1000 rows * 1KB = 1MB
+      # - roles: ~10 rows * 0.5KB = 5KB
+      # - user_roles: ~1000 rows * 0.2KB = 200KB
+      # Total data: ~1.2MB
+      #
+      # Indexes:
+      # - Primary keys: ~500KB
+      # - Foreign keys: ~200KB
+      # - Username index: ~100KB
+      # Total indexes: ~800KB
+      #
+      # PostgreSQL overhead:
+      # - System catalogs: ~50MB
+      # - WAL logs: ~100MB (default 1GB max)
+      # - Temp files: ~50MB
+      # Total overhead: ~200MB
+      #
+      # Current usage: ~202MB
+      #
+      # Growth projection:
+      # - 10,000 users (1 year): ~10MB
+      # - 100,000 users (5 years): ~100MB
+      # - Indexes grow proportionally: ~100MB
+      # Total: ~400MB
+      #
+      # Why 5Gi:
+      # ✅ ~10x current need (safety margin)
+      # ✅ Room для growth (years)
+      # ✅ Not wasteful (storage cheap)
+      # ✅ Avoids resize (disruptive)
+      #
+      # Production considerations:
+      # ════════════════════════
+      #
+      # Small app (< 10k users):
+      # - 5-10Gi sufficient
+      #
+      # Medium app (< 100k users):
+      # - 20-50Gi recommended
+      #
+      # Large app (< 1M users):
+      # - 100-500Gi
+      #
+      # Very large app (> 1M users):
+      # - 1Ti+ (consider sharding)
+      #
+      # Monitoring:
+      # ══════════
+      # Check actual usage:
+      # kubectl exec -it auth-postgres-xxx -- df -h /var/lib/postgresql/data
+      #
+      # Output:
+      # Filesystem      Size  Used Avail Use%
+      # /dev/sda1       5.0G  250M  4.8G   5%
+      #
+      # Database size query:
+      # SELECT pg_size_pretty(pg_database_size('auth_db'));
+      # → 202 MB
+      #
+      # Table sizes:
+      # SELECT
+      #   schemaname,
+      #   tablename,
+      #   pg_size_pretty(pg_total_relation_size(schemaname||'.'||tablename)) AS size
+      # FROM pg_tables
+      # WHERE schemaname = 'public'
+      # ORDER BY pg_total_relation_size(schemaname||'.'||tablename) DESC;
+      #
+      # Alert thresholds:
+      # - 70% used: Warning (plan resize)
+      # - 85% used: Critical (resize soon)
+      # - 95% used: Emergency (resize now)
+      #
+      # RESIZING:
+      # ════════
+      # Expanding PVC:
+      #
+      # 1. Check if StorageClass allows resize:
+      # kubectl get storageclass
+      # → Look для allowVolumeExpansion: true
+      #
+      # 2. Edit PVC (increase size):
+      # kubectl edit pvc auth-postgres-pvc
+      # spec:
+      #   resources:
+      #     requests:
+      #       storage: 10Gi  # Increase від 5Gi
+      #
+      # 3. Kubernetes expands volume (automatic)
+      # 4. May need pod restart (depends на storage)
+      #
+      # ⚠️  Volume expansion:
+      # ✅ Can increase (5Gi → 10Gi)
+      # ❌ Cannot decrease (10Gi → 5Gi)
+      #
+      # Shrinking (if needed):
+      # 1. Create new smaller PVC
+      # 2. Backup data (pg_dump)
+      # 3. Restore to new PVC
+      # 4. Update deployment
+      # 5. Delete old PVC
+      #
+      # KIND LIMITATIONS:
+      # ════════════════
+      # Kind local-path provisioner:
+      # - No automatic expansion
+      # - Manual resize needed:
+      #   1. Delete PVC
+      #   2. Create new PVC (larger)
+      #   3. Restore data
+      #
+      # Cloud providers:
+      # - AWS EBS: Automatic expansion ✅
+      # - Google PD: Automatic expansion ✅
+      # - Azure Disk: Automatic expansion ✅
+      #
+      # STORAGE CLASSES:
+      # ═══════════════
+      # Different storage tiers:
+      #
+      # Performance tiers:
+      # - SSD (fast, expensive)
+      # - HDD (slow, cheap)
+      # - NVMe (very fast, very expensive)
+      #
+      # AWS EBS types:
+      # - gp3: General purpose SSD (default)
+      # - gp2: General purpose SSD (older)
+      # - io1/io2: Provisioned IOPS (high performance)
+      # - st1: Throughput optimized HDD (big data)
+      # - sc1: Cold HDD (archival)
+      #
+      # For databases:
+      # ✅ gp3/SSD (good balance)
+      # ✅ io1 (high traffic)
+      # ❌ HDD (too slow)
+      #
+      # Cost optimization:
+      # ════════════════
+      # Start small, expand as needed:
+      # - Begin з 5Gi
+      # - Monitor usage
+      # - Expand before 85% full
+      # - Better than over-provisioning
+      #
+      # Backup strategy:
+      # - Don't rely на PVC only
+      # - Regular backups (pg_dump)
+      # - Off-cluster storage (S3, GCS)
+      # - Test restore procedure
+
+  # storageClassName: <storage-class-name>
+  # ═══════════════════════════════════════════════════════
+  # STORAGE CLASS NAME (optional)
+  # ═══════════════════════════════════════════════════════
+  #
+  # Commented out = use default StorageClass
+  #
+  # StorageClass = storage provisioner configuration
+  #
+  # Default StorageClass:
+  # ════════════════════
+  # Cluster has one default StorageClass
+  # PVC без storageClassName uses default
+  #
+  # Check default:
+  # kubectl get storageclass
+  #
+  # Output:
+  # NAME                 PROVISIONER             RECLAIMPOLICY
+  # standard (default)   kubernetes.io/gce-pd    Delete
+  # fast-ssd             kubernetes.io/gce-pd    Retain
+  #
+  # (default) = default StorageClass
+  #
+  # KIND:
+  # ════
+  # Default: standard (local-path provisioner)
+  # provisioner: rancher.io/local-path
+  # Location: /var/local-path-provisioner/
+  #
+  # kubectl get storageclass standard -o yaml
+  #
+  # apiVersion: storage.k8s.io/v1
+  # kind: StorageClass
+  # metadata:
+  #   name: standard
+  #   annotations:
+  #     storageclass.kubernetes.io/is-default-class: "true"
+  # provisioner: rancher.io/local-path
+  # reclaimPolicy: Delete
+  # volumeBindingMode: WaitForFirstConsumer
+  #
+  # Provisioner types:
+  # ════════════════
+  #
+  # Local storage:
+  # - kubernetes.io/no-provisioner (manual)
+  # - rancher.io/local-path (Kind)
+  # - kubernetes.io/host-path (single node)
+  #
+  # Cloud providers:
+  # - kubernetes.io/aws-ebs (AWS)
+  # - kubernetes.io/gce-pd (Google)
+  # - kubernetes.io/azure-disk (Azure)
+  #
+  # Network storage:
+  # - kubernetes.io/nfs
+  # - ceph.com/rbd (Ceph)
+  # - gluster.org/glusterfs
+  #
+  # CSI drivers (modern):
+  # - ebs.csi.aws.com (AWS EBS CSI)
+  # - pd.csi.storage.gke.io (Google PD CSI)
+  # - disk.csi.azure.com (Azure Disk CSI)
+  #
+  # EXPLICIT STORAGE CLASS:
+  # ══════════════════════
+  #
+  # Specify non-default class:
+  # storageClassName: fast-ssd
+  #
+  # Use cases:
+  # - Performance (SSD vs HDD)
+  # - Cost (cheap vs expensive)
+  # - Features (snapshots, encryption)
+  # - Location (zone, region)
+  #
+  # Example StorageClasses:
+  # ══════════════════════
+  #
+  # Fast SSD (high performance):
+  # apiVersion: storage.k8s.io/v1
+  # kind: StorageClass
+  # metadata:
+  #   name: fast-ssd
+  # provisioner: kubernetes.io/gce-pd
+  # parameters:
+  #   type: pd-ssd
+  #   replication-type: regional-pd
+  # reclaimPolicy: Retain
+  # allowVolumeExpansion: true
+  #
+  # Cheap HDD (archival):
+  # apiVersion: storage.k8s.io/v1
+  # kind: StorageClass
+  # metadata:
+  #   name: slow-hdd
+  # provisioner: kubernetes.io/aws-ebs
+  # parameters:
+  #   type: st1
+  #   encrypted: "true"
+  # reclaimPolicy: Delete
+  #
+  # Regional storage (HA):
+  # apiVersion: storage.k8s.io/v1
+  # kind: StorageClass
+  # metadata:
+  #   name: regional-pd
+  # provisioner: pd.csi.storage.gke.io
+  # parameters:
+  #   type: pd-standard
+  #   replication-type: regional-pd
+  # volumeBindingMode: WaitForFirstConsumer
+  #
+  # Usage:
+  # spec:
+  #   storageClassName: fast-ssd  # Use fast storage
+  #   resources:
+  #     requests:
+  #       storage: 100Gi
+  #
+  # RECLAIM POLICY:
+  # ══════════════
+  # What happens when PVC deleted:
+  #
+  # Delete (common):
+  # - PVC deleted → PV deleted → Data lost
+  # - Automatic cleanup
+  # - Good для temporary data
+  #
+  # Retain:
+  # - PVC deleted → PV kept → Data preserved
+  # - Manual cleanup needed
+  # - Good для important data
+  #
+  # Recycle (deprecated):
+  # - PVC deleted → PV wiped → Reusable
+  # - Don't use (use Delete або Retain)
+  #
+  # Set в StorageClass:
+  # reclaimPolicy: Retain  # Keep data
+  #
+  # Our case (Kind):
+  # reclaimPolicy: Delete (default)
+  # - Development environment
+  # - Data not critical
+  # - Easy cleanup
+  #
+  # Production:
+  # reclaimPolicy: Retain
+  # - Preserve data (safety)
+  # - Manual deletion (controlled)
+  # - Backup before delete
+  #
+  # VOLUME BINDING:
+  # ══════════════
+  # When to create PV:
+  #
+  # Immediate:
+  # - PVC created → PV created immediately
+  # - PV may be в wrong zone (pod can't schedule)
+  # - Old behavior
+  #
+  # WaitForFirstConsumer (modern):
+  # - PVC created → Pending
+  # - Pod scheduled → PV created в pod's zone
+  # - Better placement (pod і PV same zone)
+  # - Recommended
+  #
+  # StorageClass:
+  # volumeBindingMode: WaitForFirstConsumer
+  #
+  # Benefits:
+  # ✅ PV в same zone як pod (no cross-zone errors)
+  # ✅ Better performance (local access)
+  # ✅ Lower cost (no cross-zone traffic)
+  #
+  # Sequence:
+  # 1. Create PVC → Status: Pending
+  # 2. Create Pod → Scheduler picks node
+  # 3. Create PV в that node's zone
+  # 4. Bind PVC → PV
+  # 5. Mount volume
+  # 6. Pod starts
+
+# ════════════════════════════════════════════════════════════════
+# PVC LIFECYCLE
+# ════════════════════════════════════════════════════════════════
+#
+# States:
+# ══════
+#
+# Pending:
+# - PVC created
+# - No matching PV available
+# - Waiting для provisioner
+#
+# Check:
+# kubectl get pvc
+# NAME                STATUS    VOLUME   CAPACITY   AGE
+# auth-postgres-pvc   Pending   -        -          5s
+#
+# Reasons:
+# - No PV з enough capacity
+# - No matching accessMode
+# - No matching StorageClass
+# - WaitForFirstConsumer (waiting для pod)
+#
+# Bound:
+# - PVC → PV binding successful
+# - Storage ready to use
+# - Pod can mount
+#
+# kubectl get pvc
+# NAME                STATUS   VOLUME                                     CAPACITY   AGE
+# auth-postgres-pvc   Bound    pvc-a1b2c3d4-e5f6-7890-abcd-ef1234567890   5Gi        10s
+#
+# Lost:
+# - PVC bound але PV deleted
+# - Data lost
+# - PVC unusable
+#
+# Recovery:
+# - Delete PVC
+# - Create new PVC
+# - Restore від backup
+#
+# Commands:
+# ════════
+#
+# Create PVC:
+# kubectl apply -f auth-postgres-pvc.yaml
+#
+# Check status:
+# kubectl get pvc auth-postgres-pvc
+# kubectl describe pvc auth-postgres-pvc
+#
+# Details:
+# Name:          auth-postgres-pvc
+# Namespace:     tiles-infra
+# StorageClass:  standard
+# Status:        Bound
+# Volume:        pvc-123456
+# Capacity:      5Gi
+# Access Modes:  RWO
+# Events:
+#   Type    Reason                 Age   Message
+#   Normal  ProvisioningSucceeded  10s   Successfully provisioned volume
+#
+# Check bound PV:
+# kubectl get pv
+# NAME                                       CAPACITY   ACCESS MODES   STATUS   CLAIM
+# pvc-a1b2c3d4-e5f6-7890-abcd-ef1234567890   5Gi        RWO            Bound    tiles-infra/auth-postgres-pvc
+#
+# PV details:
+# kubectl describe pv pvc-a1b2c3d4-e5f6-7890-abcd-ef1234567890
+#
+# Check usage:
+# kubectl exec -it auth-postgres-xxx -- df -h /var/lib/postgresql/data
+#
+# Delete PVC:
+# kubectl delete pvc auth-postgres-pvc
+# ⚠️  Deletes PV і data (if reclaimPolicy: Delete)
+#
+# ════════════════════════════════════════════════════════════════
+# TROUBLESHOOTING
+# ════════════════════════════════════════════════════════════════
+#
+# PVC stuck в Pending:
+# ═══════════════════
+#
+# Check events:
+# kubectl describe pvc auth-postgres-pvc
+# → Events section shows errors
+#
+# Common issues:
+#
+# 1. No StorageClass:
+# Events: "no persistent volumes available"
+# Solution: Create StorageClass або use default
+#
+# 2. No capacity:
+# Events: "insufficient storage"
+# Solution: Increase PV size або add more PVs
+#
+# 3. AccessMode mismatch:
+# Events: "no volume with matching access modes"
+# Solution: Check PV accessModes match PVC
+#
+# 4. WaitForFirstConsumer:
+# Events: "waiting для first consumer"
+# Solution: Create Pod (triggers binding)
+#
+# Pod can't mount PVC:
+# ══════════════════
+#
+# Check pod events:
+# kubectl describe pod auth-postgres-xxx
+#
+# Common issues:
+#
+# 1. PVC not bound:
+# Events: "persistentvolumeclaim not found"
+# Solution: Ensure PVC exists і bound
+#
+# 2. Wrong namespace:
+# Events: "pvc not found в namespace"
+# Solution: PVC must be в same namespace
+#
+# 3. Node constraints:
+# Events: "volume node affinity conflict"
+# Solution: Pod scheduled на wrong node (zone mismatch)
+#
+# 4. Mount failure:
+# Events: "failed to mount volume"
+# Solution: Check storage backend (disk full, permissions)
+#
+# Data lost:
+# ═════════
+#
+# PVC deleted accidentally:
+# - If reclaimPolicy: Delete → Data lost
+# - If reclaimPolicy: Retain → PV still exists
+#
+# Recovery (Retain):
+# 1. Find orphaned PV:
+#    kubectl get pv | grep Released
+#
+# 2. Edit PV (remove claimRef):
+#    kubectl edit pv pvc-xxx
+#    # Delete spec.claimRef section
+#
+# 3. Create new PVC (binds to PV)
+# 4. Data preserved!
+#
+# Recovery (Delete):
+# - Data lost
+# - Restore від backup (pg_dump)
+# - Always maintain backups!

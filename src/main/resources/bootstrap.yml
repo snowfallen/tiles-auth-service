@@ -1,16 +1,126 @@
+# ════════════════════════════════════════════════════════════════
+# BOOTSTRAP CONFIGURATION
+# ════════════════════════════════════════════════════════════════
+#
+# Завантажується ПЕРЕД application.yml
+# Використовується для Config Server connection
+#
+# WHY bootstrap.yml:
+# ═════════════════
+# Spring Boot lifecycle:
+# 1. Load bootstrap.yml (це)
+# 2. Connect to Config Server (використовуючи цей конфіг)
+# 3. Fetch properties від Config Server
+# 4. Load application.yml (локальний)
+# 5. Merge все разом
+#
+# Bootstrap context:
+# - Parent ApplicationContext (створюється перший)
+# - Config Server client налаштовується тут
+# - Не можна використати Config Server для bootstrap.yml (курка і яйце)
+#
+# Що має бути тут:
+# ✅ spring.application.name (для Config Server)
+# ✅ spring.cloud.config.* (підключення до Config Server)
+# ✅ spring.profiles.active (який profile)
+# ❌ Бізнес-логіка конфігурація (datasource, redis) → Config Server
+
 spring:
   application:
     name: auth-service
+    # ═══════════════════════════════════════════════════
+    # APPLICATION NAME
+    # ═══════════════════════════════════════════════════
+    #
+    # КРИТИЧНО важливо для Config Server!
+    #
+    # Config Server використовує це ім'я для пошуку конфігурації:
+    # GET http://config-server:8888/auth-service/dev
+    #                                └──────┬──────┘
+    #                            application.name
+    #
+    # Файли на Config Server:
+    # - auth-service.yml (для всіх оточень)
+    # - auth-service-dev.yml (тільки dev)
+    # - auth-service-prod.yml (тільки prod)
+    #
+    # Якщо не вказано:
+    # - Default: "application"
+    # - Шукає: application.yml, application-dev.yml
+    # - ❌ Не знайде auth-service специфічну конфігурацію
 
   cloud:
     config:
       uri: http://config-service.tiles-infra.svc.cluster.local:8888
+      # ═══════════════════════════════════════════════
+      # CONFIG SERVER URI
+      # ═══════════════════════════════════════════════
+      #
+      # Endpoint Config Server
+      #
+      # Kubernetes DNS (full):
+      # config-service.tiles-infra.svc.cluster.local:8888
+      #
+      # Short form (same namespace):
+      # config-service:8888
+      #
+      # Local development:
+      # http://localhost:8888
+      #
+      # Environment variable override:
+      # SPRING_CLOUD_CONFIG_URI=http://config-service:8888
+      #
+      # Kubernetes Deployment:
+      # env:
+      #   - name: SPRING_CLOUD_CONFIG_URI
+      #     value: http://config-service.tiles-infra.svc.cluster.local:8888
+
       fail-fast: false
+      # ═══════════════════════════════════════════════
+      # FAIL FAST
+      # ═══════════════════════════════════════════════
+      #
+      # false (dev): Продовжити якщо Config Server недоступний
+      # - Використає application.yml (локальний fallback)
+      # - Застереження в логах
+      #
+      # true (prod): Не стартувати без Config Server
+      # - Впевненість що конфігурація правильна
+      # - Fail-fast principle
+      #
+      # Override для production:
+      # SPRING_CLOUD_CONFIG_FAIL_FAST=true
+
       retry:
-        initial-interval: 1000
-        max-attempts: 6
-        max-interval: 2000
-        multiplier: 1.1
+        initial-interval: 1000    # 1 секунда
+        max-attempts: 6           # 6 спроб
+        max-interval: 2000        # Максимум 2 секунди
+        multiplier: 1.1           # Експоненційний backoff 10%
 
   profiles:
     active: ${SPRING_PROFILES_ACTIVE:dev}
+    # ═══════════════════════════════════════════════
+    # ACTIVE PROFILE
+    # ═══════════════════════════════════════════════
+    #
+    # Визначає який конфіг завантажувати:
+    # - dev → auth-service-dev.yml
+    # - prod → auth-service-prod.yml
+    #
+    # Kubernetes:
+    # env:
+    #   - name: SPRING_PROFILES_ACTIVE
+    #     value: "prod"
+#  ```
+
+---
+
+## 2️⃣ CONFIG SERVER (централізована конфігурація)
+
+### Config Server Repository Structure
+```
+#config-repo/
+#├── application.yml                    # Спільна для ВСІХ сервісів
+#├── auth-service.yml                   # Спільна для auth-service (всі оточення)
+#├── auth-service-dev.yml              # Тільки dev оточення
+#└── auth-service-prod.yml             # Тільки prod оточення

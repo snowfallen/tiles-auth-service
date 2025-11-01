@@ -1,184 +1,2957 @@
-# Auth Service Deployment
+# 📦 KUBERNETES CONFIGURATION - ПОВНИЙ РОЗБІР
+
+---
+
+## 1️⃣ AUTH SERVICE DEPLOYMENT
+
+### auth-service-deployment.yaml
+
+# ════════════════════════════════════════════════════════════════
+# AUTH SERVICE DEPLOYMENT
+# ════════════════════════════════════════════════════════════════
+#
+# Kubernetes Deployment для Auth Service
+#
+# WHAT IS DEPLOYMENT:
+# ══════════════════
+# Deployment = declarative way to manage Pods і ReplicaSets
+#
+# Key features:
+# ✅ Desired state management (you declare, K8s maintains)
+# ✅ Rolling updates (zero-downtime deploys)
+# ✅ Rollback capability (undo bad deploys)
+# ✅ Scaling (increase/decrease replicas)
+# ✅ Self-healing (restarts failed pods)
+#
+# vs Pod:
+# - Pod = single instance (manual management)
+# - Deployment = manages multiple Pods (automatic)
+#
+# vs StatefulSet:
+# - Deployment = stateless apps (auth-service)
+# - StatefulSet = stateful apps (databases)
+#
+# DEPLOYMENT FLOW:
+# ═══════════════
+# 1. Apply deployment.yaml (kubectl apply)
+# 2. K8s creates ReplicaSet
+# 3. ReplicaSet creates Pods (replicas: 2)
+# 4. Pods start containers
+# 5. Probes check health
+# 6. Service routes traffic to healthy Pods
 
 apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: auth-service
-  namespace: tiles-infra
-  labels:
-    app: auth-service
-    component: backend
-spec:
-  # Multiple replicas можливі (stateless service)
-  replicas: 2
+# ══════════════
+# API Version
+# ══════════════
+#
+# apps/v1:
+# - Stable API (not beta)
+# - Deployment resource
+# - Available since Kubernetes 1.9+
+#
+# Other versions:
+# - v1: Core resources (Pod, Service, ConfigMap)
+# - batch/v1: Jobs, CronJobs
+# - networking.k8s.io/v1: Ingress
 
-  # RollingUpdate strategy (zero-downtime deploys)
+kind: Deployment
+# ═══════════════
+# Resource Type
+# ═══════════════
+#
+# Deployment = workload controller
+#
+# Other kinds:
+# - Pod (single instance)
+# - ReplicaSet (low-level, don't use directly)
+# - StatefulSet (stateful apps)
+# - DaemonSet (one pod per node)
+# - Job (run to completion)
+
+metadata:
+  # ════════════════════════════════════════════════════════
+  # METADATA
+  # ════════════════════════════════════════════════════════
+  #
+  # Metadata = information about resource
+  #
+  # Fields:
+  # - name: Resource identifier (unique в namespace)
+  # - namespace: Logical grouping
+  # - labels: Key-value tags (для selection)
+  # - annotations: Non-identifying metadata
+
+  name: auth-service
+  # ═══════════════════
+  # Deployment Name
+  # ═══════════════════
+  #
+  # Unique identifier в namespace
+  #
+  # Naming conventions:
+  # ✅ Lowercase (required)
+  # ✅ Hyphens (not underscores)
+  # ✅ Descriptive (service-name)
+  #
+  # Examples:
+  # ✅ auth-service
+  # ✅ user-service
+  # ❌ Auth-Service (uppercase)
+  # ❌ auth_service (underscore)
+
+  namespace: tiles-infra
+  # ════════════════════
+  # Namespace
+  # ════════════════════
+  #
+  # Logical cluster partition
+  #
+  # Benefits:
+  # ✅ Resource isolation (prod, dev, staging)
+  # ✅ Access control (RBAC per namespace)
+  # ✅ Resource quotas (limit usage)
+  # ✅ Network policies (isolate traffic)
+  #
+  # Common patterns:
+  # - Per environment: prod, staging, dev
+  # - Per team: team-a, team-b
+  # - Per app: app-1-infra, app-1-services
+  #
+  # tiles-infra:
+  # - Infrastructure services
+  # - Auth, Config, Discovery
+  # - Shared across application
+  #
+  # If not specified:
+  # Uses "default" namespace (not recommended)
+
+  labels:
+    # ════════════════════
+    # Labels
+    # ════════════════════
+    #
+    # Key-value pairs для identification і selection
+    #
+    # Uses:
+    # ✅ Selectors (Service, NetworkPolicy)
+    # ✅ Grouping (kubectl get pods -l app=auth-service)
+    # ✅ Monitoring (Prometheus, Grafana)
+    # ✅ Debugging (filter resources)
+    #
+    # Best practices:
+    # - Use standard labels (app, component, version)
+    # - Consistent naming
+    # - Meaningful values
+    #
+    # Standard labels (recommended):
+    # - app.kubernetes.io/name
+    # - app.kubernetes.io/component
+    # - app.kubernetes.io/version
+    # - app.kubernetes.io/part-of
+    #
+    # We use simplified:
+
+    app: auth-service
+    # ═══════════════
+    # App Label
+    # ═══════════════
+    #
+    # Primary identifier
+    # Used by Service selector
+    #
+    # Matches:
+    # - Service selector (matchLabels)
+    # - Monitoring tools
+    # - Log aggregation
+
+    component: backend
+    # ══════════════════
+    # Component Label
+    # ══════════════════
+    #
+    # Application tier
+    #
+    # Values:
+    # - backend (API services)
+    # - frontend (UI)
+    # - database (data stores)
+    # - cache (Redis, Memcached)
+    # - queue (RabbitMQ, Kafka)
+    #
+    # Uses:
+    # - Network policies (allow backend → database)
+    # - Monitoring dashboards (group by component)
+    # - Resource allocation (backends need more CPU)
+
+spec:
+  # ════════════════════════════════════════════════════════
+  # DEPLOYMENT SPEC
+  # ════════════════════════════════════════════════════════
+  #
+  # Desired state specification
+  # K8s ensures actual state matches spec
+
+  replicas: 2
+  # ═══════════════
+  # Replicas
+  # ═══════════════
+  #
+  # Number of Pod instances to run
+  #
+  # WHY 2 REPLICAS:
+  # ✅ High availability (one fails, one serves)
+  # ✅ Load balancing (distribute requests)
+  # ✅ Rolling updates (zero downtime)
+  # ✅ Resource efficiency (not too many)
+  #
+  # Scaling considerations:
+  #
+  # Single replica (replicas: 1):
+  # ✅ Simple
+  # ✅ Less resources
+  # ❌ Downtime during updates
+  # ❌ No load balancing
+  # ❌ Single point of failure
+  #
+  # Multiple replicas (replicas: 2+):
+  # ✅ High availability
+  # ✅ Load balancing
+  # ✅ Zero-downtime updates
+  # ⚠️  More resources needed
+  #
+  # How many replicas:
+  # - Small load: 2 (HA minimum)
+  # - Medium load: 3-5 (good balance)
+  # - High load: 5+ (horizontal scaling)
+  #
+  # Auto-scaling:
+  # HorizontalPodAutoscaler (HPA):
+  # - Automatic scaling based on metrics
+  # - CPU, memory, custom metrics
+  # - Min/max replicas
+  #
+  # Example HPA:
+  # apiVersion: autoscaling/v2
+  # kind: HorizontalPodAutoscaler
+  # metadata:
+  #   name: auth-service-hpa
+  # spec:
+  #   scaleTargetRef:
+  #     apiVersion: apps/v1
+  #     kind: Deployment
+  #     name: auth-service
+  #   minReplicas: 2
+  #   maxReplicas: 10
+  #   metrics:
+  #   - type: Resource
+  #     resource:
+  #       name: cpu
+  #       target:
+  #         type: Utilization
+  #         averageUtilization: 70
+  #
+  # STATELESS REQUIREMENT:
+  # Auth service = stateless (JWT, Redis storage)
+  # Can run multiple replicas safely:
+  # ✅ No shared in-memory state
+  # ✅ No local file storage
+  # ✅ Session data в Redis (shared)
+  #
+  # If stateful:
+  # - Use StatefulSet (not Deployment)
+  # - Use sticky sessions (sessionAffinity)
+  # - Consider master-replica pattern
+
   strategy:
+    # ════════════════════════════════════════════════════
+    # UPDATE STRATEGY
+    # ════════════════════════════════════════════════════
+    #
+    # How to update Pods during deployment
+    #
+    # Two strategies:
+    # 1. RollingUpdate (default, zero-downtime)
+    # 2. Recreate (stop all, start new)
+
     type: RollingUpdate
+    # ═══════════════════════
+    # Strategy Type
+    # ═══════════════════════
+    #
+    # RollingUpdate:
+    # - Gradually replace old Pods з new
+    # - Zero downtime (some Pods always running)
+    # - Controlled rollout
+    #
+    # Process:
+    # 1. Start new Pod (v2)
+    # 2. Wait для readiness
+    # 3. Stop old Pod (v1)
+    # 4. Repeat until all updated
+    #
+    # Benefits:
+    # ✅ Zero downtime
+    # ✅ Gradual rollout (detect issues early)
+    # ✅ Easy rollback
+    # ✅ Resource efficient (controlled surge)
+    #
+    # Recreate strategy (alternative):
+    # type: Recreate
+    #
+    # Process:
+    # 1. Stop ALL old Pods
+    # 2. Start ALL new Pods
+    #
+    # When to use:
+    # - Stateful apps (cannot run multiple versions)
+    # - Breaking changes (incompatible versions)
+    # - Development environments (speed over uptime)
+    #
+    # ❌ Downtime (all Pods stopped)
+    # ❌ No gradual rollout
+    # ✅ Simpler (no surge management)
+    # ✅ Faster (parallel replacement)
+
     rollingUpdate:
-      maxSurge: 1        # Max 1 extra pod during update
-      maxUnavailable: 0  # Always keep at least 1 pod running
+      # ════════════════════════════════════════════════
+      # ROLLING UPDATE PARAMETERS
+      # ════════════════════════════════════════════════
+      #
+      # Control how rolling update proceeds
+
+      maxSurge: 1
+      # ═══════════════════
+      # Max Surge
+      # ═══════════════════
+      #
+      # Max additional Pods during update
+      #
+      # Value types:
+      # - Number: Absolute count (1, 2, 3)
+      # - Percentage: Relative to replicas (25%, 50%)
+      #
+      # maxSurge: 1 (з replicas: 2):
+      # - Normal: 2 Pods running
+      # - During update: Max 3 Pods (2 + 1 surge)
+      #
+      # Update flow:
+      # 1. Start: 2 old Pods running
+      # 2. Create 1 new Pod (total: 3)
+      # 3. New Pod ready
+      # 4. Stop 1 old Pod (total: 2)
+      # 5. Repeat для second Pod
+      #
+      # Why maxSurge: 1:
+      # ✅ Controlled resource usage (+50% peak)
+      # ✅ Faster rollout (don't wait для termination)
+      # ✅ Maintains availability (extra capacity)
+      #
+      # Higher surge (maxSurge: 2):
+      # ✅ Faster rollout (more parallel updates)
+      # ⚠️  More resources (more Pods running)
+      #
+      # Example з replicas: 4, maxSurge: 2:
+      # - Normal: 4 Pods
+      # - Peak: 6 Pods (4 + 2 surge)
+      # - Update 2 Pods at once
+      #
+      # Percentage example:
+      # maxSurge: 25%
+      # - replicas: 4 → surge: 1 Pod (25% of 4)
+      # - replicas: 10 → surge: 2-3 Pods
+      #
+      # Trade-offs:
+      # High surge (50%, 100%):
+      # ✅ Very fast rollout
+      # ❌ More resources needed
+      # ❌ Higher cost (temporarily)
+      #
+      # Low surge (1 Pod, 10%):
+      # ✅ Resource efficient
+      # ✅ Controlled rollout
+      # ❌ Slower update
+
+      maxUnavailable: 0
+      # ══════════════════════
+      # Max Unavailable
+      # ══════════════════════
+      #
+      # Max Pods unavailable during update
+      #
+      # Value types:
+      # - Number: Absolute count (0, 1, 2)
+      # - Percentage: Relative to replicas (25%, 50%)
+      #
+      # maxUnavailable: 0 (з replicas: 2):
+      # - Always keep 2 Pods running
+      # - Never terminate Pod until replacement ready
+      # - Zero capacity reduction
+      #
+      # Update flow:
+      # 1. Start: 2 old Pods running (available: 2)
+      # 2. Create new Pod, wait ready (available: 2)
+      # 3. Terminate old Pod (available: 2)
+      # 4. Create new Pod, wait ready (available: 2)
+      # 5. Terminate old Pod (available: 2)
+      #
+      # WHY maxUnavailable: 0:
+      # ✅ Zero capacity loss (always full capacity)
+      # ✅ Zero downtime (requests always served)
+      # ✅ Safe rollout (no service degradation)
+      #
+      # Alternative: maxUnavailable: 1
+      # - Allow 1 Pod to be down
+      # - Faster rollout (don't wait для ready)
+      # - Reduced capacity during update
+      #
+      # Example з replicas: 2, maxUnavailable: 1:
+      # 1. Start: 2 Pods running
+      # 2. Stop 1 old Pod (only 1 running!)
+      # 3. Start 1 new Pod
+      # 4. Wait ready (back to 2 running)
+      # 5. Repeat
+      #
+      # ⚠️  Capacity reduced to 50% temporarily
+      #
+      # Percentage example:
+      # maxUnavailable: 25%
+      # - replicas: 4 → allow 1 unavailable
+      # - replicas: 8 → allow 2 unavailable
+      #
+      # BEST PRACTICES:
+      # ══════════════
+      #
+      # High availability apps:
+      # maxSurge: 1
+      # maxUnavailable: 0
+      # → Zero downtime, controlled resources
+      #
+      # Fast rollout, OK з brief capacity loss:
+      # maxSurge: 0
+      # maxUnavailable: 1
+      # → Faster, less resources
+      #
+      # Very fast rollout:
+      # maxSurge: 100%
+      # maxUnavailable: 0
+      # → Double capacity temporarily, zero downtime
+      #
+      # Development environment:
+      # maxSurge: 0
+      # maxUnavailable: 100%
+      # → Stop all, start new (fastest)
+      #
+      # CANNOT BE BOTH ZERO:
+      # maxSurge: 0 + maxUnavailable: 0 = invalid
+      # → Update cannot proceed (no room для changes)
 
   selector:
+    # ════════════════════════════════════════════════════
+    # POD SELECTOR
+    # ════════════════════════════════════════════════════
+    #
+    # How Deployment finds its Pods
+    #
+    # Deployment doesn't directly manage Pods.
+    # Instead, it creates ReplicaSet, which creates Pods.
+    #
+    # Selector:
+    # - Defines which Pods belong to this Deployment
+    # - Must match template.metadata.labels
+    # - Immutable (cannot change after creation)
+
     matchLabels:
+      # ═══════════════════════
+      # Match Labels
+      # ═══════════════════════
+      #
+      # Label selector (equality-based)
+      #
+      # All labels must match (AND logic)
+      #
+      # Example:
+      # matchLabels:
+      #   app: auth-service
+      #   version: v1
+      #
+      # Matches Pods з:
+      # ✅ app=auth-service AND version=v1
+      # ❌ app=auth-service only (missing version)
+      # ❌ version=v1 only (missing app)
+      #
+      # Advanced selectors (matchExpressions):
+      # matchExpressions:
+      #   - key: app
+      #     operator: In
+      #     values:
+      #       - auth-service
+      #       - auth-service-v2
+      #
+      # Operators:
+      # - In: Key в value list
+      # - NotIn: Key NOT в value list
+      # - Exists: Key exists (ignore value)
+      # - DoesNotExist: Key doesn't exist
+
       app: auth-service
+      # ═══════════════════
+      # App Selector
+      # ═══════════════════
+      #
+      # Primary selector label
+      #
+      # MUST MATCH:
+      # template.metadata.labels.app
+      #
+      # This Deployment manages Pods з label:
+      # app: auth-service
+      #
+      # If mismatch:
+      # Deployment creates Pods але cannot find them
+      # → Stuck в creating state
 
   template:
+    # ════════════════════════════════════════════════════
+    # POD TEMPLATE
+    # ════════════════════════════════════════════════════
+    #
+    # Template для creating Pods
+    #
+    # This is the actual Pod specification.
+    # Deployment uses this template to create Pods.
+    #
+    # Structure identical to Pod resource:
+    # - metadata (labels, annotations)
+    # - spec (containers, volumes, тощо)
+
     metadata:
+      # ════════════════════════════════════════════════
+      # POD METADATA
+      # ════════════════════════════════════════════════
+      #
+      # Metadata для each Pod created
+
       labels:
+        # ═══════════════════════
+        # Pod Labels
+        # ═══════════════════════
+        #
+        # Labels applied to each Pod
+        #
+        # MUST INCLUDE:
+        # All labels від selector.matchLabels
+        #
+        # Can include additional labels:
+        # - version: v1.0.0
+        # - tier: backend
+        # - track: stable
+
         app: auth-service
+        # Primary label (matches selector)
+
         component: backend
+        # Component label (organizational)
+
       annotations:
-        # Prometheus scraping (optional, для metrics)
+        # ════════════════════════
+        # Pod Annotations
+        # ════════════════════════
+        #
+        # Non-identifying metadata
+        # Not used для selection (unlike labels)
+        #
+        # Common uses:
+        # - Configuration hints (prometheus scraping)
+        # - Deployment info (build number, git hash)
+        # - Operational data (responsible team)
+        #
+        # vs Labels:
+        # Labels: Identification, selection, grouping
+        # Annotations: Metadata, configuration, tools
+
         prometheus.io/scrape: "true"
+        # ══════════════════════════════
+        # Prometheus Scrape Annotation
+        # ══════════════════════════════
+        #
+        # Tells Prometheus to scrape metrics
+        #
+        # Prometheus ServiceMonitor looks для:
+        # - prometheus.io/scrape: "true"
+        # - prometheus.io/port: "8084"
+        # - prometheus.io/path: "/actuator/prometheus"
+        #
+        # If scraping enabled:
+        # Prometheus sends:
+        # GET http://pod-ip:8084/actuator/prometheus
+        #
+        # Auth service exposes metrics:
+        # - JVM metrics (heap, threads)
+        # - HTTP metrics (requests, latency)
+        # - Custom metrics (logins, token issues)
+        #
+        # Alternative (ServiceMonitor CRD):
+        # apiVersion: monitoring.coreos.com/v1
+        # kind: ServiceMonitor
+        # metadata:
+        #   name: auth-service
+        # spec:
+        #   selector:
+        #     matchLabels:
+        #       app: auth-service
+        #   endpoints:
+        #   - port: http
+        #     path: /actuator/prometheus
+
         prometheus.io/port: "8084"
+        # ════════════════════════════
+        # Prometheus Port Annotation
+        # ════════════════════════════
+        #
+        # Port где Prometheus scrapes metrics
+        #
+        # Auth service port: 8084
+        # Metrics endpoint: :8084/actuator/prometheus
+
         prometheus.io/path: "/actuator/prometheus"
+        # ═══════════════════════════════════════
+        # Prometheus Path Annotation
+        # ═══════════════════════════════════════
+        #
+        # URL path для metrics endpoint
+        #
+        # Spring Boot Actuator exposes:
+        # /actuator/health → Health checks
+        # /actuator/metrics → Metrics list
+        # /actuator/prometheus → Prometheus format
+        #
+        # Prometheus format example:
+        # # HELP jvm_memory_used_bytes Used memory
+        # # TYPE jvm_memory_used_bytes gauge
+        # jvm_memory_used_bytes{area="heap"} 268435456.0
+
     spec:
-      # Init container - wait для PostgreSQL
+      # ════════════════════════════════════════════════════
+      # POD SPEC
+      # ════════════════════════════════════════════════════
+      #
+      # Pod specification (containers, volumes, тощо)
+
       initContainers:
+        # ════════════════════════════════════════════════
+        # INIT CONTAINERS
+        # ════════════════════════════════════════════════
+        #
+        # Containers that run BEFORE main container
+        #
+        # Use cases:
+        # ✅ Wait для dependencies (database ready?)
+        # ✅ Setup tasks (download configs, migrate DB)
+        # ✅ Security (fetch secrets, scan images)
+        # ✅ Validation (check environment)
+        #
+        # Behavior:
+        # - Run sequentially (one після another)
+        # - Must complete successfully (exit 0)
+        # - If fail, Pod restarts (retries init containers)
+        # - Main container waits для all init containers
+        #
+        # Example flow:
+        # 1. Init container 1: Wait для PostgreSQL (30s)
+        # 2. Init container 2: Wait для Redis (10s)
+        # 3. Main container starts (auth-service)
+        #
+        # vs Sidecar:
+        # Init: Runs before, completes
+        # Sidecar: Runs alongside, continuous
+        #
+        # Common patterns:
+        # - wait-for-db
+        # - download-config
+        # - run-migrations
+        # - setup-volumes
+
         - name: wait-for-postgres
+          # ════════════════════════════════════════════
+          # WAIT FOR POSTGRESQL
+          # ════════════════════════════════════════════
+          #
+          # Ensures PostgreSQL ready before starting app
+          #
+          # WHY NEEDED:
+          # Pod might start before database ready:
+          # 1. Both Pods start simultaneously
+          # 2. Auth service tries to connect
+          # 3. PostgreSQL still initializing
+          # 4. Connection fails
+          # 5. App crashes, restarts
+          # 6. Repeat until PostgreSQL ready (slow!)
+          #
+          # With init container:
+          # 1. Init container starts
+          # 2. Waits для PostgreSQL (blocks)
+          # 3. PostgreSQL becomes ready
+          # 4. Init container exits (success)
+          # 5. Main container starts
+          # 6. Connection succeeds immediately
+          #
+          # Benefits:
+          # ✅ No connection errors
+          # ✅ Faster startup (no retry loops)
+          # ✅ Cleaner logs (no error spam)
+          # ✅ Better UX (no failed requests)
+
           image: busybox:1.36
+          # ══════════════════
+          # Image
+          # ══════════════════
+          #
+          # Lightweight image з networking tools
+          #
+          # busybox:
+          # - Alpine-based (tiny, ~1MB)
+          # - Unix utilities (sh, nc, wget)
+          # - Fast download
+          # - Perfect для init containers
+          #
+          # Version pinning (1.36):
+          # ✅ Reproducible builds
+          # ✅ Stable behavior
+          # ✅ Security (known vulnerabilities)
+          #
+          # Alternative images:
+          # - alpine:3.18 (more tools)
+          # - nicolaka/netshoot (debugging)
+          # - postgres:16-alpine (pg_isready)
+
           command:
+            # ════════════════════════════════════════
+            # Command
+            # ════════════════════════════════════════
+            #
+            # Command to run в container
+            #
+            # Format:
+            # command: [executable, arg1, arg2]
+            #
+            # Overrides Docker ENTRYPOINT
+            #
+            # vs args:
+            # command: Executable to run
+            # args: Arguments to pass
+            #
+            # Example:
+            # command: ["/bin/sh"]
+            # args: ["-c", "echo hello"]
+            # → Runs: /bin/sh -c "echo hello"
+
             - sh
+            # Shell executable
+            # busybox uses sh (not bash)
+
             - -c
+            # Run following string як command
+
             - |
+              # ════════════════════════════════════
+              # WAIT SCRIPT
+              # ════════════════════════════════════
+              #
+              # Shell script to wait для PostgreSQL
+              #
+              # | = literal block scalar (YAML)
+              # Preserves newlines і formatting
+
               echo "Waiting for PostgreSQL..."
+              # Log message (visible в pod logs)
+              # kubectl logs auth-service-xxx -c wait-for-postgres
+
               until nc -z auth-postgres.tiles-infra.svc.cluster.local 5432; do
+                # ════════════════════════════════════════
+                # Check PostgreSQL Connection
+                # ════════════════════════════════════════
+                #
+                # nc = netcat (networking utility)
+                # -z = zero I/O mode (scan only, no data)
+                #
+                # Checks if port open (accepting connections)
+                #
+                # Target:
+                # auth-postgres.tiles-infra.svc.cluster.local
+                # ├─ auth-postgres: Service name
+                # ├─ tiles-infra: Namespace
+                # ├─ svc: Service domain
+                # └─ cluster.local: Cluster domain
+                #
+                # Port 5432 = PostgreSQL default port
+                #
+                # Exit codes:
+                # 0 = Connection successful (port open)
+                # 1 = Connection failed (port closed/unreachable)
+                #
+                # until loop:
+                # Repeat until command succeeds (exit 0)
+                #
+                # Alternative checks:
+                # - pg_isready (requires postgres client)
+                # - curl (HTTP health check)
+                # - TCP socket connect
+
                 echo "PostgreSQL not ready yet..."
+                # Log retry attempt
+
                 sleep 2
+                # Wait 2 seconds before retry
+                # Prevents spam (don't hammer PostgreSQL)
+                #
+                # Retry interval considerations:
+                # - Too short (1s): Wastes resources, log spam
+                # - Too long (10s): Slow startup
+                # - 2-5s: Good balance
+
               done
+              # Loop exits when nc succeeds
+
               echo "PostgreSQL is ready!"
+              # Success message
+              # Init container exits (exit 0)
+              # Main container can start
+
+              # ════════════════════════════════════════
+              # ERROR HANDLING
+              # ════════════════════════════════════════
+              #
+              # What if PostgreSQL never ready?
+              #
+              # Pod behavior:
+              # - Init container keeps retrying (forever?)
+              # - Pod stuck в Init:0/2 state
+              # - restartPolicy determines next step
+              #
+              # restartPolicy: Always (default)
+              # - Eventually exceeds backoff limit
+              # - Pod enters CrashLoopBackOff
+              # - K8s keeps retrying (exponential backoff)
+              #
+              # Timeout (optional):
+              # Add timeout to script:
+              #
+              # TIMEOUT=300  # 5 minutes
+              # ELAPSED=0
+              # until nc -z ...; do
+              #   if [ $ELAPSED -ge $TIMEOUT ]; then
+              #     echo "Timeout waiting для PostgreSQL"
+              #     exit 1
+              #   fi
+              #   sleep 2
+              #   ELAPSED=$((ELAPSED + 2))
+              # done
+              #
+              # Benefits:
+              # ✅ Fail fast (don't wait forever)
+              # ✅ Clear error (timeout message)
+              # ❌ More complex script
 
         - name: wait-for-redis
+          # ════════════════════════════════════════════
+          # WAIT FOR REDIS
+          # ════════════════════════════════════════════
+          #
+          # Similar to PostgreSQL wait
+          # Ensures Redis ready before app starts
+          #
+          # Redis dependencies:
+          # - Refresh token storage
+          # - Session tracking
+          # - Cache (future)
+          #
+          # Without wait:
+          # - App tries to connect Redis
+          # - Redis initializing
+          # - Connection fails
+          # - App crashes
+          #
+          # With wait:
+          # - Wait до Redis ready
+          # - Then start app
+          # - Connection succeeds
+
           image: busybox:1.36
+
           command:
             - sh
             - -c
             - |
               echo "Waiting for Redis..."
+
               until nc -z auth-redis.tiles-infra.svc.cluster.local 6379; do
+                # Redis service: auth-redis
+                # Port 6379 = Redis default
+
                 echo "Redis not ready yet..."
                 sleep 2
               done
+
               echo "Redis is ready!"
 
+              # ════════════════════════════════════════
+              # REDIS AUTHENTICATION
+              # ════════════════════════════════════════
+              #
+              # Current check:
+              # Only verifies port open (TCP connection)
+              #
+              # Does NOT verify:
+              # ❌ Redis accepts connections
+              # ❌ Authentication works
+              # ❌ Database operational
+              #
+              # Better check (з redis-cli):
+              #
+              # image: redis:7-alpine
+              # command:
+              #   - sh
+              #   - -c
+              #   - |
+              #     until redis-cli -h auth-redis -p 6379 \
+              #       -a "$REDIS_PASSWORD" ping | grep PONG; do
+              #       echo "Redis not ready..."
+              #       sleep 2
+              #     done
+              #     echo "Redis is ready!"
+              #
+              # env:
+              #   - name: REDIS_PASSWORD
+              #     valueFrom:
+              #       secretKeyRef:
+              #         name: auth-redis-secret
+              #         key: REDIS_PASSWORD
+              #
+              # Benefits:
+              # ✅ Verifies Redis operational
+              # ✅ Tests authentication
+              # ✅ Confirms PING/PONG
+              #
+              # Trade-offs:
+              # ⚠️  Larger image (redis-cli needed)
+              # ⚠️  Slower download
+              # ✅  More reliable check
+
+              # ════════════════════════════════════════
+              # INIT CONTAINER ORDER
+              # ════════════════════════════════════════
+              #
+              # Init containers run sequentially:
+              # 1. wait-for-postgres (completes)
+              # 2. wait-for-redis (completes)
+              # 3. Main container starts
+              #
+              # Parallel check (faster):
+              # Single init container checks both:
+              #
+              # - name: wait-for-dependencies
+              #   command:
+              #     - sh
+              #     - -c
+              #     - |
+              #       echo "Waiting для dependencies..."
+              #       
+              #       # Check PostgreSQL
+              #       until nc -z auth-postgres...:5432; do
+              #         echo "PostgreSQL not ready..."
+              #         sleep 1
+              #       done
+              #       
+              #       # Check Redis
+              #       until nc -z auth-redis...:6379; do
+              #         echo "Redis not ready..."
+              #         sleep 1
+              #       done
+              #       
+              #       echo "All dependencies ready!"
+              #
+              # Benefits:
+              # ✅ Faster (parallel checks)
+              # ✅ Single container (simpler)
+              #
+              # Trade-offs:
+              # ⚠️  Less modular (one script)
+              # ⚠️  Harder to debug (which failed?)
+
       containers:
+        # ════════════════════════════════════════════════
+        # MAIN CONTAINERS
+        # ════════════════════════════════════════════════
+        #
+        # Application containers (run continuously)
+        #
+        # vs initContainers:
+        # initContainers: Run before, complete
+        # containers: Run continuously, restart on failure
+        #
+        # Can have multiple containers (sidecar pattern):
+        # - Main app container
+        # - Logging sidecar
+        # - Metrics exporter
+        # - Security proxy
+
         - name: auth-service
+          # ════════════════════════════════════════════
+          # AUTH SERVICE CONTAINER
+          # ════════════════════════════════════════════
+          #
+          # Main application container
+          # Runs Auth Service (Spring Boot)
+
           image: tiles/auth-service:1.0.0
-          imagePullPolicy: IfNotPresent  # Kind: local images
+          # ═══════════════════════════════════════
+          # Container Image
+          # ═══════════════════════════════════════
+          #
+          # Docker image to run
+          #
+          # Format: [registry/]repository[:tag]
+          #
+          # Examples:
+          # docker.io/library/nginx:1.25
+          # ├─ docker.io: Registry (Docker Hub)
+          # ├─ library: Organization
+          # ├─ nginx: Repository
+          # └─ 1.25: Tag (version)
+          #
+          # tiles/auth-service:1.0.0
+          # ├─ tiles: Organization (local)
+          # ├─ auth-service: Repository
+          # └─ 1.0.0: Tag
+          #
+          # No registry = local image (Kind)
+          #
+          # VERSIONING:
+          # ══════════
+          # Tags:
+          # ✅ 1.0.0 (semantic version)
+          # ✅ v1.0.0-rc.1 (release candidate)
+          # ✅ main-a1b2c3d (git commit)
+          # ❌ latest (not reproducible)
+          #
+          # Why avoid :latest:
+          # - Not reproducible (changes)
+          # - No rollback (which version?)
+          # - Cache issues (may not pull)
+          #
+          # Best practices:
+          # ✅ Pin specific version
+          # ✅ Use immutable tags
+          # ✅ Track versions (git tags)
+          #
+          # Image building:
+          # docker build -t tiles/auth-service:1.0.0 .
+          # kind load docker-image tiles/auth-service:1.0.0
+          #
+          # Multi-stage builds:
+          # - Build stage (Maven, dependencies)
+          # - Runtime stage (JRE, JAR only)
+          # - Smaller final image
+          #
+          # Registry options:
+          # - Docker Hub (docker.io)
+          # - GitHub Container Registry (ghcr.io)
+          # - Google Container Registry (gcr.io)
+          # - Amazon ECR (aws account.ecr)
+          # - Private registry (registry.company.com)
 
+          imagePullPolicy: IfNotPresent
+          # ══════════════════════════════════════
+          # Image Pull Policy
+          # ══════════════════════════════════════
+          #
+          # When to pull image від registry
+          #
+          # Options:
+          #
+          # IfNotPresent (default для tagged images):
+          # - Pull if NOT on node
+          # - Use local if exists
+          # - Good для development (faster)
+          #
+          # Always:
+          # - Always pull від registry
+          # - Even if local exists
+          # - Ensures latest version
+          # - Slower (network transfer)
+          # - Good для :latest tag
+          #
+          # Never:
+          # - Never pull від registry
+          # - Must exist locally
+          # - Error if not found
+          # - Good для air-gapped clusters
+          #
+          # Why IfNotPresent (Kind):
+          # ✅ Uses local images (faster)
+          # ✅ No registry needed (offline)
+          # ✅ Development-friendly
+          #
+          # Production recommendation:
+          # Always (з versioned tags)
+          # - Ensures consistency
+          # - Pulls updates
+          # - Registry as source of truth
+          #
+          # Image lifecycle (Kind):
+          # 1. Build: docker build -t tiles/auth-service:1.0.0
+          # 2. Load: kind load docker-image tiles/auth-service:1.0.0
+          # 3. Deploy: kubectl apply -f deployment.yaml
+          # 4. Pull policy: IfNotPresent → uses loaded image
+          #
+          # Troubleshooting:
+          # ImagePullBackOff error:
+          # - Image not в registry
+          # - Image not loaded (Kind)
+          # - Wrong image name
+          # - No pull credentials
+          #
+          # Check:
+          # kubectl describe pod auth-service-xxx
+          # → Events section shows pull errors
           ports:
+            # ════════════════════════════════════════════
+            # CONTAINER PORTS
+            # ════════════════════════════════════════════
+            #
+            # Ports exposed by container
+            #
+            # Purpose:
+            # - Documentation (which ports used)
+            # - Service discovery (find ports)
+            # - Network policies (allow/deny traffic)
+            #
+            # NOTE: This is informational!
+            # Container can bind any port regardless of declaration.
+            # Best practice: Declare all used ports.
+
             - containerPort: 8084
+              # ═══════════════════════════════════════
+              # Container Port Number
+              # ═══════════════════════════════════════
+              #
+              # Port where application listens
+              #
+              # Auth Service configuration:
+              # server.port=8084 (application.yml)
+              #
+              # Application binds to:
+              # http://0.0.0.0:8084
+              # → Listens on all interfaces
+              #
+              # Why 0.0.0.0 (not localhost):
+              # - localhost = 127.0.0.1 (loopback only)
+              # - 0.0.0.0 = all interfaces (external access)
+              # - Kubernetes needs external access (Service → Pod)
+              #
+              # Port selection:
+              # - Avoid well-known ports (<1024, need root)
+              # - Use service-specific (8080-9999 range)
+              # - Document convention (8080=gateway, 8084=auth)
+              #
+              # Multiple ports:
+              # - containerPort: 8084  # HTTP
+              # - containerPort: 8443  # HTTPS (если есть)
+              # - containerPort: 9090  # Metrics (если отдельный)
+
               name: http
+              # ═══════════════════════════════════════
+              # Port Name
+              # ═══════════════════════════════════════
+              #
+              # Named port (optional, но recommended)
+              #
+              # Benefits:
+              # ✅ Self-documenting (clear purpose)
+              # ✅ Service can reference by name
+              # ✅ NetworkPolicy can use name
+              #
+              # Service usage:
+              # spec:
+              #   ports:
+              #     - port: 80
+              #       targetPort: http  # References name (not 8084)
+              #
+              # Why useful:
+              # - Change port number (update one place)
+              # - Multiple containers (same name, different port)
+              # - Clear intention (http, https, metrics)
+              #
+              # Naming conventions:
+              # - http, https (web traffic)
+              # - grpc (gRPC services)
+              # - metrics (Prometheus)
+              # - health (health checks)
+              # - admin (admin API)
+
               protocol: TCP
+              # ═══════════════════════════════════════
+              # Protocol
+              # ═══════════════════════════════════════
+              #
+              # Network protocol
+              #
+              # Options:
+              # - TCP (default, most common)
+              # - UDP (stateless, faster)
+              # - SCTP (advanced, rarely used)
+              #
+              # TCP:
+              # ✅ Reliable (guaranteed delivery)
+              # ✅ Ordered (packets in order)
+              # ✅ Connection-oriented
+              # ✅ HTTP, HTTPS, gRPC
+              #
+              # UDP:
+              # ✅ Fast (no handshake)
+              # ✅ Low latency
+              # ❌ Unreliable (packets may be lost)
+              # ❌ Unordered
+              # ✅ DNS, video streaming, gaming
+              #
+              # Auth Service = HTTP REST API = TCP
 
-          # Environment variables
           env:
-            # Spring profiles
-            - name: SPRING_PROFILES_ACTIVE
-              value: "dev"
+              # ════════════════════════════════════════════
+              # ENVIRONMENT VARIABLES
+              # ════════════════════════════════════════════
+              #
+              # Configuration через environment variables
+              #
+              # Spring Boot supports:
+              # - application.yml (static config)
+              # - Environment variables (dynamic config)
+              # - Config Server (centralized config)
+              #
+              # Priority (highest to lowest):
+              # 1. Environment variables
+              # 2. Config Server
+              # 3. application.yml
+              #
+              # Why environment variables:
+              # ✅ 12-factor app (config separate from code)
+              # ✅ Environment-specific (dev, staging, prod)
+              # ✅ Kubernetes-native (ConfigMap, Secret)
+              # ✅ No code changes (just redeploy)
+              #
+              # Spring Boot naming:
+              # Environment: SPRING_DATASOURCE_URL
+              # Property: spring.datasource.url
+              # → Converts underscores to dots, lowercase
 
-            # PostgreSQL connection
-            - name: SPRING_DATASOURCE_URL
-              value: jdbc:postgresql://auth-postgres.tiles-infra.svc.cluster.local:5432/auth_db
+              - name: SPRING_PROFILES_ACTIVE
+                # ═══════════════════════════════════════
+                # Spring Profiles
+                # ═══════════════════════════════════════
+                #
+                # Activates Spring profile
+                #
+                # Profiles = environment-specific configs
+                #
+                # Common profiles:
+                # - dev (development, verbose logging)
+                # - staging (pre-production testing)
+                # - prod (production, optimized)
+                #
+                # Profile files:
+                # - application.yml (base config)
+                # - application-dev.yml (dev overrides)
+                # - application-prod.yml (prod overrides)
+                #
+                # Merged config:
+                # application.yml + application-dev.yml
+                #
+                # Example differences:
+                # dev:
+                # - logging.level.root=DEBUG
+                # - spring.jpa.show-sql=true
+                # - No connection pooling
+                #
+                # prod:
+                # - logging.level.root=WARN
+                # - spring.jpa.show-sql=false
+                # - Connection pooling enabled
+                # - Caching enabled
+                #
+                # Multiple profiles:
+                # SPRING_PROFILES_ACTIVE=dev,debug,local
 
-            - name: SPRING_DATASOURCE_USERNAME
-              valueFrom:
-                configMapKeyRef:
-                  name: auth-postgres-config
-                  key: POSTGRES_USER
+                value: "dev"
+                # ════════════════════════════════
+                # Direct Value
+                # ════════════════════════════════
+                #
+                # Hardcoded string value
+                #
+                # vs valueFrom:
+                # value: Literal string
+                # valueFrom: Reference (ConfigMap, Secret)
+                #
+                # When to use value:
+                # ✅ Simple constants
+                # ✅ Environment identifiers
+                # ✅ Flags (true/false)
+                #
+                # When to use valueFrom:
+                # ✅ Sensitive data (passwords)
+                # ✅ Shared config (multiple pods)
+                # ✅ Dynamic values (service URLs)
 
-            - name: POSTGRES_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: auth-postgres-secret
-                  key: POSTGRES_PASSWORD
+              - name: SPRING_DATASOURCE_URL
+                # ═══════════════════════════════════════
+                # Database URL
+                # ═══════════════════════════════════════
+                #
+                # JDBC connection string
+                #
+                # Format:
+                # jdbc:postgresql://host:port/database
+                #
+                # Components:
+                # - jdbc: JDBC protocol
+                # - postgresql: Database type
+                # - host: Server hostname/IP
+                # - port: Database port (5432)
+                # - database: Database name
+                #
+                # Why Kubernetes DNS:
+                # auth-postgres.tiles-infra.svc.cluster.local
+                # ├─ auth-postgres: Service name
+                # ├─ tiles-infra: Namespace
+                # ├─ svc: Service type
+                # └─ cluster.local: Cluster domain
+                #
+                # Short form (same namespace):
+                # jdbc:postgresql://auth-postgres:5432/auth_db
+                #
+                # Cross-namespace (если в разных namespace):
+                # jdbc:postgresql://auth-postgres.tiles-infra:5432/auth_db
+                #
+                # External database (outside cluster):
+                # jdbc:postgresql://db.example.com:5432/auth_db
+                #
+                # SSL connection (production):
+                # jdbc:postgresql://host:5432/db?ssl=true&sslmode=require
+                #
+                # Connection pooling (automatic в Spring Boot):
+                # HikariCP (default, very fast)
+                # - minimumIdle: 10
+                # - maximumPoolSize: 20
+                # - connectionTimeout: 30000
 
-            # Redis connection
-            - name: SPRING_DATA_REDIS_HOST
-              value: auth-redis.tiles-infra.svc.cluster.local
+                value: jdbc:postgresql://auth-postgres.tiles-infra.svc.cluster.local:5432/auth_db
 
-            - name: SPRING_DATA_REDIS_PORT
-              value: "6379"
+              - name: SPRING_DATASOURCE_USERNAME
+                # ═══════════════════════════════════════
+                # Database Username
+                # ═══════════════════════════════════════
+                #
+                # PostgreSQL user для authentication
 
-            - name: REDIS_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: auth-redis-secret
-                  key: REDIS_PASSWORD
+                valueFrom:
+                  # ═══════════════════════════════════
+                  # Value From Source
+                  # ═══════════════════════════════════
+                  #
+                  # Load value від external source
+                  #
+                  # Sources:
+                  # - configMapKeyRef (ConfigMap)
+                  # - secretKeyRef (Secret)
+                  # - fieldRef (Pod metadata)
+                  # - resourceFieldRef (Resource limits)
+                  #
+                  # Why valueFrom:
+                  # ✅ DRY (don't repeat values)
+                  # ✅ Centralized config (one place)
+                  # ✅ Share між pods
+                  # ✅ Update без redeploy
+                  #
+                  # ConfigMap vs Secret:
+                  # ConfigMap: Non-sensitive (usernames, URLs)
+                  # Secret: Sensitive (passwords, tokens)
 
-            # JWT configuration
-            - name: JWT_SECRET
-              valueFrom:
-                secretKeyRef:
-                  name: jwt-secret  # Створимо окремий Secret
-                  key: JWT_SECRET
+                  configMapKeyRef:
+                    # ════════════════════════════════
+                    # ConfigMap Reference
+                    # ════════════════════════════════
+                    #
+                    # Load від ConfigMap
+                    #
+                    # ConfigMap = key-value storage
+                    # Non-sensitive configuration
 
-            # Config Server
-            - name: SPRING_CLOUD_CONFIG_URI
-              value: http://config-service.tiles-infra.svc.cluster.local:8888
+                    name: auth-postgres-config
+                    # ═══════════════════════════
+                    # ConfigMap Name
+                    # ═══════════════════════════
+                    #
+                    # Which ConfigMap to read
+                    #
+                    # Must exist в same namespace
+                    # (tiles-infra)
+                    #
+                    # ConfigMap structure:
+                    # apiVersion: v1
+                    # kind: ConfigMap
+                    # metadata:
+                    #   name: auth-postgres-config
+                    # data:
+                    #   POSTGRES_USER: auth_user
+                    #   POSTGRES_DB: auth_db
 
-          # Resource limits
+                    key: POSTGRES_USER
+                    # ═══════════════════════════
+                    # ConfigMap Key
+                    # ═══════════════════════════
+                    #
+                    # Which key to extract
+                    #
+                    # Value: auth_user
+                    #
+                    # Result:
+                    # SPRING_DATASOURCE_USERNAME=auth_user
+                    #
+                    # If key doesn't exist:
+                    # Pod fails to start (error)
+
+              - name: POSTGRES_PASSWORD
+                # ═══════════════════════════════════════
+                # Database Password (Sensitive!)
+                # ═══════════════════════════════════════
+                #
+                # PostgreSQL password
+                #
+                # IMPORTANT: Use Secret (not ConfigMap)
+                # Passwords = sensitive data
+
+                valueFrom:
+                  secretKeyRef:
+                    # ════════════════════════════════
+                    # Secret Reference
+                    # ════════════════════════════════
+                    #
+                    # Load від Kubernetes Secret
+                    #
+                    # Secret vs ConfigMap:
+                    # ✅ Base64 encoded (obfuscation)
+                    # ✅ RBAC control (who can read)
+                    # ✅ Audit logging (access tracked)
+                    # ✅ Encryption at rest (optional)
+                    #
+                    # Secret types:
+                    # - Opaque (generic key-value)
+                    # - kubernetes.io/tls (certificates)
+                    # - kubernetes.io/dockerconfigjson (registry auth)
+                    #
+                    # Security best practices:
+                    # ⚠️ Secrets NOT encrypted by default
+                    # ⚠️ Stored в etcd (plain text)
+                    # ✅ Enable encryption at rest
+                    # ✅ Use external secret managers:
+                    #    - Sealed Secrets (Bitnami)
+                    #    - External Secrets Operator
+                    #    - HashiCorp Vault
+                    #    - AWS Secrets Manager
+                    #    - Google Secret Manager
+
+                    name: auth-postgres-secret
+                    # ═══════════════════════════
+                    # Secret Name
+                    # ═══════════════════════════
+                    #
+                    # Secret structure:
+                    # apiVersion: v1
+                    # kind: Secret
+                    # metadata:
+                    #   name: auth-postgres-secret
+                    # type: Opaque
+                    # stringData:
+                    #   POSTGRES_PASSWORD: auth_password_change_me_in_prod
+
+                    key: POSTGRES_PASSWORD
+                    # ═══════════════════════════
+                    # Secret Key
+                    # ═══════════════════════════
+                    #
+                    # Extract password value
+                    #
+                    # Result:
+                    # POSTGRES_PASSWORD=auth_password_change_me_in_prod
+                    #
+                    # Spring Boot usage:
+                    # spring:
+                    #   datasource:
+                    #     password: ${POSTGRES_PASSWORD}
+
+              - name: SPRING_DATA_REDIS_HOST
+                # ═══════════════════════════════════════
+                # Redis Hostname
+                # ═══════════════════════════════════════
+                #
+                # Redis service endpoint
+                #
+                # Kubernetes DNS:
+                # auth-redis.tiles-infra.svc.cluster.local
+                #
+                # Short form (same namespace):
+                # auth-redis
+                #
+                # Redis connection:
+                # Spring Boot creates connection pool
+                # Lettuce (default, async I/O)
+                # або Jedis (synchronous)
+
+                value: auth-redis.tiles-infra.svc.cluster.local
+
+              - name: SPRING_DATA_REDIS_PORT
+                # ═══════════════════════════════════════
+                # Redis Port
+                # ═══════════════════════════════════════
+                #
+                # Redis default port: 6379
+                #
+                # Why string "6379" (not number):
+                # Environment variables = always strings
+                # Spring Boot converts to integer
+
+                value: "6379"
+
+              - name: REDIS_PASSWORD
+                # ═══════════════════════════════════════
+                # Redis Password (Sensitive!)
+                # ═══════════════════════════════════════
+                #
+                # Redis authentication
+                #
+                # Redis AUTH command:
+                # AUTH password
+                #
+                # Spring Boot usage:
+                # spring:
+                #   data:
+                #     redis:
+                #       password: ${REDIS_PASSWORD}
+
+                valueFrom:
+                  secretKeyRef:
+                    name: auth-redis-secret
+                    key: REDIS_PASSWORD
+                    # Value: redis_password_change_me_in_prod
+
+              - name: JWT_PRIVATE_KEY
+                # ═══════════════════════════════════════
+                # JWT Private Key (Very Sensitive!)
+                # ═══════════════════════════════════════
+                #
+                # RSA private key для signing JWTs
+                #
+                # CRITICAL SECURITY:
+                # ⚠️  Never expose (compromise = full breach)
+                # ⚠️  Rotate regularly (every 90 days)
+                # ⚠️  Store securely (encrypted storage)
+                # ⚠️  Limit access (RBAC)
+                #
+                # Key format:
+                # -----BEGIN PRIVATE KEY-----
+                # MIIEvgIBADANBgkqhkiG9w0BAQEFAASCB...
+                # -----END PRIVATE KEY-----
+                #
+                # Multi-line value в Secret:
+                # stringData:
+                #   JWT_PRIVATE_KEY: |
+                #     -----BEGIN PRIVATE KEY-----
+                #     ...
+                #     -----END PRIVATE KEY-----
+                #
+                # Spring Boot reads:
+                # jwt.private-key=${JWT_PRIVATE_KEY}
+
+                valueFrom:
+                  secretKeyRef:
+                    name: jwt-keys-secret
+                    # ═══════════════════════════
+                    # JWT Keys Secret
+                    # ═══════════════════════════
+                    #
+                    # Contains both keys:
+                    # - JWT_PRIVATE_KEY (signing)
+                    # - JWT_PUBLIC_KEY (validation)
+                    #
+                    # Why separate secret:
+                    # ✅ Grouped keys (related data)
+                    # ✅ Access control (limit who reads)
+                    # ✅ Rotation (update both together)
+
+                    key: JWT_PRIVATE_KEY
+
+              - name: JWT_PUBLIC_KEY
+                # ═══════════════════════════════════════
+                # JWT Public Key
+                # ═══════════════════════════════════════
+                #
+                # RSA public key для verifying JWTs
+                #
+                # Published via JWKS endpoint:
+                # GET /.well-known/jwks.json
+                #
+                # Gateway uses для validation
+                #
+                # Safe to expose (public key cryptography):
+                # ✅ Cannot derive private key
+                # ✅ Only verifies signatures
+                #
+                # Key format:
+                # -----BEGIN PUBLIC KEY-----
+                # MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8A...
+                # -----END PUBLIC KEY-----
+
+                valueFrom:
+                  secretKeyRef:
+                    name: jwt-keys-secret
+                    key: JWT_PUBLIC_KEY
+
+              - name: SPRING_CLOUD_CONFIG_URI
+                # ═══════════════════════════════════════
+                # Config Server URL
+                # ═══════════════════════════════════════
+                #
+                # Spring Cloud Config Server endpoint
+                #
+                # Centralized configuration:
+                # - Shared config (database URLs)
+                # - Environment-specific (dev, prod)
+                # - Dynamic updates (refresh scope)
+                # - Version control (Git backend)
+                #
+                # Config Server URL:
+                # http://config-service.tiles-infra.svc.cluster.local:8888
+                #
+                # Application fetches config:
+                # 1. Spring Boot starts
+                # 2. Connects to Config Server
+                # 3. Requests: /auth-service/dev
+                # 4. Config Server returns properties
+                # 5. Merges з local application.yml
+                #
+                # Priority:
+                # 1. Environment variables (highest)
+                # 2. Config Server
+                # 3. application.yml (lowest)
+                #
+                # Why Config Server:
+                # ✅ Centralized (one source of truth)
+                # ✅ Dynamic (no redeploy needed)
+                # ✅ Versioned (Git history)
+                # ✅ Encrypted (sensitive values)
+                #
+                # Without Config Server:
+                # - Config в each service
+                # - Duplicate values
+                # - Hard to update (redeploy all)
+                #
+                # Config Server alternatives:
+                # - Consul (HashiCorp)
+                # - etcd (CoreOS)
+                # - ZooKeeper (Apache)
+
+                value: http://config-service.tiles-infra.svc.cluster.local:8888
+
           resources:
-            requests:
-              memory: "512Mi"
-              cpu: "250m"
-            limits:
-              memory: "1Gi"
-              cpu: "1000m"
+              # ════════════════════════════════════════════
+              # RESOURCE LIMITS
+              # ════════════════════════════════════════════
+              #
+              # CPU і memory allocation
+              #
+              # Two levels:
+              # - requests: Guaranteed minimum
+              # - limits: Maximum allowed
+              #
+              # Why needed:
+              # ✅ Prevent resource starvation
+              # ✅ Fair scheduling (Pods balanced)
+              # ✅ Stability (no OOM kills)
+              # ✅ Cost control (predictable usage)
+              #
+              # Without limits:
+              # - Pod can consume all node resources
+              # - Other Pods starve
+              # - Node crashes (OOM)
+              #
+              # Kubernetes QoS Classes:
+              # ════════════════════════
+              #
+              # Guaranteed (highest priority):
+              # - requests = limits
+              # - Never evicted (unless exceeds limits)
+              #
+              # Burstable (medium priority):
+              # - requests < limits
+              # - Can burst to limits
+              # - Evicted if node under pressure
+              #
+              # BestEffort (lowest priority):
+              # - No requests або limits
+              # - First to be evicted
+              # - Not recommended (unpredictable)
+              #
+              # This config = Burstable:
+              # requests: 512Mi/250m
+              # limits: 1Gi/1000m
 
-          # Liveness probe
+              requests:
+                # ═══════════════════════════════════════
+                # Resource Requests
+                # ═══════════════════════════════════════
+                #
+                # Guaranteed minimum resources
+                #
+                # Kubernetes scheduler:
+                # 1. Pod needs 512Mi memory, 250m CPU
+                # 2. Scheduler finds node з available:
+                #    - Memory: 512Mi+ free
+                #    - CPU: 250m+ free
+                # 3. Schedules Pod on that node
+                # 4. Resources reserved (not available для others)
+                #
+                # If no node has resources:
+                # Pod stuck в Pending state
+                # Event: "Insufficient memory/cpu"
+
+                memory: "512Mi"
+                # ═══════════════════════════════════
+                # Memory Request
+                # ═══════════════════════════════════
+                #
+                # Guaranteed memory
+                #
+                # Units:
+                # - Ki/Mi/Gi (binary, 1024-based)
+                # - K/M/G (decimal, 1000-based)
+                #
+                # Examples:
+                # - 512Mi = 512 * 1024^2 bytes = 536,870,912 bytes
+                # - 1Gi = 1024Mi = 1,073,741,824 bytes
+                # - 500M = 500 * 1000^2 bytes = 500,000,000 bytes
+                #
+                # Why 512Mi для Auth Service:
+                # - Spring Boot базовий: ~200Mi
+                # - JVM heap: ~300Mi
+                # - Liquibase migrations: +100Mi
+                # - Buffer: +100Mi
+                # Total: ~500-600Mi
+                #
+                # JVM heap settings:
+                # -Xms256m (initial heap)
+                # -Xmx768m (max heap, 75% of limit)
+                #
+                # Why not full 1Gi:
+                # - Leave room для non-heap memory
+                # - Native memory (threads, metaspace)
+                # - OS buffers
+                # - Safety margin
+                #
+                # Memory issues:
+                # OOMKilled (Out of Memory):
+                # - Pod exceeds limit
+                # - Kubernetes kills pod
+                # - Pod restarts (CrashLoopBackOff)
+                #
+                # Prevention:
+                # ✅ Set appropriate limits
+                # ✅ Monitor memory usage
+                # ✅ Tune JVM heap
+                # ✅ Fix memory leaks
+
+                cpu: "250m"
+                # ═══════════════════════════════════
+                # CPU Request
+                # ═══════════════════════════════════
+                #
+                # Guaranteed CPU time
+                #
+                # Units:
+                # - m (millicores, 1000m = 1 core)
+                # - Number (cores, 0.5 = 500m)
+                #
+                # Examples:
+                # - 250m = 0.25 cores = 25% of one core
+                # - 1000m = 1 core = 100% of one core
+                # - 2 = 2000m = 2 cores
+                #
+                # CPU vs Memory:
+                # Memory: Hard limit (OOM kill if exceeded)
+                # CPU: Soft limit (throttled, but not killed)
+                #
+                # CPU throttling:
+                # - Pod uses more than limit
+                # - Kubernetes throttles (slows down)
+                # - Pod not killed (continues running)
+                # - Requests slower (increased latency)
+                #
+                # Why 250m для Auth Service:
+                # - Low traffic: 100-200m
+                # - Medium traffic: 200-400m
+                # - High traffic: 400-800m
+                # - Burst capacity: up to 1000m (limit)
+                #
+                # Request = average usage
+                # Limit = peak usage
+                #
+                # CPU shares:
+                # Requests determine CPU share weight
+                # - Pod A: 250m request
+                # - Pod B: 500m request
+                # - Pod B gets 2x CPU time
+                #
+                # Monitoring:
+                # kubectl top pod auth-service-xxx
+                # → Shows actual CPU/memory usage
+                #
+                # Optimization:
+                # - Too low: Throttling (slow)
+                # - Too high: Wasted resources
+                # - Right-size: Monitor і adjust
+
+              limits:
+                # ═══════════════════════════════════════
+                # Resource Limits
+                # ═══════════════════════════════════════
+                #
+                # Maximum resources allowed
+                #
+                # Cannot exceed limits:
+                # - Memory: OOMKilled (pod killed)
+                # - CPU: Throttled (slowed down)
+
+                memory: "1Gi"
+                # ═══════════════════════════════════
+                # Memory Limit
+                # ═══════════════════════════════════
+                #
+                # Maximum memory
+                #
+                # 1Gi = 1024Mi
+                # Double of request (512Mi)
+                #
+                # Allows bursting:
+                # - Normal: 512Mi (request)
+                # - Peak: 1Gi (limit)
+                # - Burst capacity: 512Mi
+                #
+                # Why 1Gi:
+                # - Spring Boot normal: 500-700Mi
+                # - Peak (traffic spike): 800-900Mi
+                # - Safety margin: 100Mi
+                #
+                # Memory leak protection:
+                # If memory keeps growing:
+                # - Reaches 1Gi
+                # - Kubernetes kills pod
+                # - Pod restarts (fresh memory)
+                #
+                # OOMKilled scenario:
+                # 1. Memory leak (bug)
+                # 2. Memory usage: 512Mi → 1Gi
+                # 3. Reaches limit
+                # 4. OOMKilled
+                # 5. Pod restarts
+                # 6. Repeat (CrashLoopBackOff)
+                #
+                # Prevention:
+                # ✅ Fix memory leaks (profiling)
+                # ✅ Limit object caching
+                # ✅ Tune garbage collection
+                # ✅ Monitor memory trends
+
+                cpu: "1000m"
+                # ═══════════════════════════════════
+                # CPU Limit
+                # ═══════════════════════════════════
+                #
+                # Maximum CPU
+                #
+                # 1000m = 1 full core
+                # 4x of request (250m)
+                #
+                # CPU burstable:
+                # - Normal: 250m (25% core)
+                # - Peak: 1000m (100% core)
+                # - Burst capacity: 750m
+                #
+                # Why 1000m:
+                # - Normal load: 200-400m
+                # - Traffic spike: 600-800m
+                # - Max burst: 1000m (1 core)
+                #
+                # CPU throttling:
+                # If tries to use > 1000m:
+                # - Kubernetes throttles
+                # - Slows down execution
+                # - Requests take longer
+                # - No crash (unlike memory)
+                #
+                # Monitoring throttling:
+                # kubectl top pod auth-service-xxx
+                # → If CPU at limit + slow → throttled
+                #
+                # Solution:
+                # - Increase limit
+                # - Optimize code (reduce CPU)
+                # - Scale horizontally (more replicas)
+
           livenessProbe:
-            httpGet:
-              path: /actuator/health/liveness
-              port: 8084
-            initialDelaySeconds: 60  # Longer для Liquibase migrations
-            periodSeconds: 10
-            timeoutSeconds: 5
-            failureThreshold: 3
+              # ════════════════════════════════════════════
+              # LIVENESS PROBE
+              # ════════════════════════════════════════════
+              #
+              # "Is application alive?"
+              #
+              # Checks if application responsive
+              # If fails → Kubernetes restarts pod
+              #
+              # Purpose:
+              # ✅ Detect deadlocks (app frozen)
+              # ✅ Detect infinite loops (app stuck)
+              # ✅ Detect crashed app (process alive but broken)
+              # ✅ Self-healing (automatic restart)
+              #
+              # vs Readiness:
+              # Liveness: Is app broken? → Restart
+              # Readiness: Is app ready? → Don't send traffic
+              #
+              # When to restart:
+              # - Deadlock (threads blocked)
+              # - Memory exhaustion (OOM imminent)
+              # - Database connection lost (cannot recover)
+              # - Critical error (application broken)
+              #
+              # Probe types:
+              # - httpGet (HTTP request)
+              # - tcpSocket (TCP connection)
+              # - exec (command execution)
+              # - grpc (gRPC health check)
 
-          # Readiness probe
+              httpGet:
+                # ═══════════════════════════════════
+                # HTTP GET Probe
+                # ═══════════════════════════════════
+                #
+                # Makes HTTP request
+                #
+                # Success: 200-399 response code
+                # Failure: Other codes, timeout, connection error
+
+                path: /actuator/health/liveness
+                # ══════════════════════════════════
+                # Liveness Endpoint
+                # ══════════════════════════════════
+                #
+                # Spring Boot Actuator endpoint
+                #
+                # Returns:
+                # {
+                #   "status": "UP"
+                # }
+                #
+                # Checks:
+                # ✅ Application context loaded
+                # ✅ Critical beans initialized
+                # ✅ No deadlocks detected
+                #
+                # Does NOT check:
+                # ❌ Database connectivity (не для liveness)
+                # ❌ External services (не для liveness)
+                # ❌ Cache status (не для liveness)
+                #
+                # Why minimal checks:
+                # - Liveness → restart decision
+                # - Restart = disruptive (downtime)
+                # - Only restart if truly broken
+                # - Don't restart для temporary issues
+                #
+                # Example bad liveness:
+                # Check database connection
+                # → Database temporarily down
+                # → Liveness fails
+                # → Pod restarts
+                # → Still no database
+                # → Liveness fails again
+                # → CrashLoopBackOff
+                # ❌ Cascading failure!
+                #
+                # Good liveness:
+                # Check only application health
+                # → Database down (temporary)
+                # → Liveness succeeds (app alive)
+                # → Readiness fails (don't send traffic)
+                # → Database recovers
+                # → Readiness succeeds
+                # ✅ No restart needed!
+
+                port: 8084
+                # ══════════════════════════════════
+                # Probe Port
+                # ══════════════════════════════════
+                #
+                # Port to probe
+                #
+                # Can be:
+                # - Number: 8084
+                # - Name: http (references containerPort name)
+                #
+                # Using name (better):
+                # port: http
+                # → Change port в one place
+
+              initialDelaySeconds: 60
+              # ═══════════════════════════════════════
+              # Initial Delay
+              # ═══════════════════════════════════════
+              #
+              # Wait before first probe
+              #
+              # 60 seconds = allow slow startup
+              #
+              # Auth Service startup:
+              # 1. JVM initialization (5-10s)
+              # 2. Spring Boot context (10-20s)
+              # 3. Liquibase migrations (10-30s)
+              # 4. Connection pools (5s)
+              # 5. Ready (total: ~30-60s)
+              #
+              # Why 60s:
+              # ✅ Covers normal startup
+              # ✅ Includes Liquibase time
+              # ✅ Prevents premature restarts
+              #
+              # Too short (10s):
+              # - Probe during startup
+              # - Fails (app not ready)
+              # - Restart
+              # - Never finishes startup
+              # - CrashLoopBackOff
+              #
+              # Too long (300s):
+              # - Slow failure detection
+              # - Broken pod runs longer
+              # - Longer downtime
+              #
+              # Startup probe (better alternative):
+              # Use startupProbe для slow startup
+              # Then short livenessProbe delay
+
+              periodSeconds: 10
+              # ═══════════════════════════════════════
+              # Period
+              # ═══════════════════════════════════════
+              #
+              # How often to probe (seconds)
+              #
+              # Every 10 seconds = check health
+              #
+              # Trade-off:
+              # Short (5s):
+              # ✅ Fast failure detection
+              # ❌ More overhead (frequent requests)
+              #
+              # Long (30s):
+              # ✅ Less overhead
+              # ❌ Slow failure detection
+              #
+              # 10s = good balance
+              # - Detect failures quickly
+              # - Reasonable overhead
+
+              timeoutSeconds: 5
+              # ═══════════════════════════════════════
+              # Timeout
+              # ═══════════════════════════════════════
+              #
+              # Max time to wait для response
+              #
+              # 5 seconds timeout
+              #
+              # If slower than 5s:
+              # - Probe fails (timeout)
+              # - Counts към failure threshold
+              #
+              # Why 5s:
+              # - Health endpoint should be fast (<100ms)
+              # - 5s allows для temporary slowness
+              # - Network delays
+              #
+              # If timing out:
+              # - Check endpoint performance
+              # - Increase timeout (last resort)
+              # - Fix slow health checks
+
+              failureThreshold: 3
+              # ═══════════════════════════════════════
+              # Failure Threshold
+              # ═══════════════════════════════════════
+              #
+              # Consecutive failures before action
+              #
+              # 3 failures = restart pod
+              #
+              # Failure sequence:
+              # 1. Probe 1: Fails
+              # 2. Wait 10s (periodSeconds)
+              # 3. Probe 2: Fails
+              # 4. Wait 10s
+              # 5. Probe 3: Fails
+              # 6. Restart pod (after 30s total)
+              #
+              # Why 3 (not 1):
+              # ✅ Avoids false positives (temporary glitches)
+              # ✅ Allows brief slowness
+              # ✅ More stable (less restarts)
+              #
+              # Trade-off:
+              # Low (1):
+              # ✅ Fast reaction
+              # ❌ Many false positives
+              # ❌ Unstable (frequent restarts)
+              #
+              # High (10):
+              # ✅ Very stable
+              # ❌ Slow detection (100s)
+              # ❌ Broken pod runs longer
+              #
+              # 3 = good default
+              # Detection time: 30s (3 * 10s)
+
           readinessProbe:
-            httpGet:
-              path: /actuator/health/readiness
-              port: 8084
-            initialDelaySeconds: 30
-            periodSeconds: 5
-            timeoutSeconds: 3
-            failureThreshold: 3
+              # ════════════════════════════════════════════
+              # READINESS PROBE
+              # ════════════════════════════════════════════
+              #
+              # "Is application ready to serve traffic?"
+              #
+              # Checks if application can handle requests
+              # If fails → Remove від Service endpoints
+              #
+              # Purpose:
+              # ✅ Zero-downtime deployments
+              # ✅ Graceful startup (wait до ready)
+              # ✅ Graceful shutdown (drain connections)
+              # ✅ Dependency checks (database, cache)
+              #
+              # vs Liveness:
+              # Liveness: Restart if broken
+              # Readiness: Don't send traffic if not ready
+              #
+              # Traffic routing:
+              # Ready: Service sends traffic → Pod
+              # Not ready: Service skips pod → Other pods
+              #
+              # Deployment rollout:
+              # 1. New pod starts
+              # 2. Readiness: Not ready (don't send traffic)
+              # 3. Application initializes
+              # 4. Dependencies check (DB, Redis)
+              # 5. Readiness: Ready (send traffic)
+              # 6. Old pod terminates
+              # → Zero downtime!
 
-          # Startup probe (для slow startup)
+              httpGet:
+                path: /actuator/health/readiness
+                # ══════════════════════════════════
+                # Readiness Endpoint
+                # ══════════════════════════════════
+                #
+                # Spring Boot Actuator endpoint
+                #
+                # Checks:
+                # ✅ Database connectivity (can query?)
+                # ✅ Redis connectivity (can connect?)
+                # ✅ Config Server (configuration loaded?)
+                # ✅ All dependencies ready
+                #
+                # Returns:
+                # {
+                #   "status": "UP",
+                #   "components": {
+                #     "db": {"status": "UP"},
+                #     "redis": {"status": "UP"},
+                #     "ping": {"status": "UP"}
+                #   }
+                # }
+                #
+                # If any component DOWN:
+                # {
+                #   "status": "DOWN",
+                #   "components": {
+                #     "db": {"status": "DOWN", "details": {...}}
+                #   }
+                # }
+                #
+                # Detailed checks:
+                # ✅ Can execute SELECT 1 (database)
+                # ✅ Can PING (Redis)
+                # ✅ Connection pools healthy
+                #
+                # vs Liveness:
+                # Liveness: Minimal checks (app alive?)
+                # Readiness: Full checks (all dependencies ready?)
+
+                port: 8084
+
+              initialDelaySeconds: 30
+              # ═══════════════════════════════════════
+              # Initial Delay
+              # ═══════════════════════════════════════
+              #
+              # 30 seconds before first readiness check
+              #
+              # Shorter than liveness (60s):
+              # - Readiness doesn't restart (safer)
+              # - Check earlier (route traffic sooner)
+              #
+              # Startup sequence:
+              # 0s: Container starts
+              # 30s: First readiness check
+              # 60s: First liveness check
+              #
+              # Why 30s:
+              # - Spring Boot context loaded (~20s)
+              # - Liquibase might still run
+              # - Not critical (just delays traffic)
+
+              periodSeconds: 5
+              # ═══════════════════════════════════════
+              # Period
+              # ═══════════════════════════════════════
+              #
+              # Check every 5 seconds
+              #
+              # More frequent than liveness (10s):
+              # ✅ Faster traffic rerouting
+              # ✅ Quick response to issues
+              # ✅ Smoother deployments
+              #
+              # Safe to probe often:
+              # - Readiness doesn't restart
+              # - Only affects traffic routing
+
+              timeoutSeconds: 3
+              # ═══════════════════════════════════════
+              # Timeout
+              # ═══════════════════════════════════════
+              #
+              # 3 seconds timeout
+              #
+              # Shorter than liveness (5s):
+              # - Readiness checks dependencies
+              # - Should be fast (< 1s)
+              # - 3s allows network delays
+
+              failureThreshold: 3
+              # ═══════════════════════════════════════
+              # Failure Threshold
+              # ═══════════════════════════════════════
+              #
+              # 3 consecutive failures → Not ready
+              #
+              # Total time to unready: 15s (3 * 5s)
+              #
+              # Recovery:
+              # Once succeeds → Ready again
+              # successThreshold: 1 (default)
+
           startupProbe:
-            httpGet:
-              path: /actuator/health/liveness
-              port: 8084
-            initialDelaySeconds: 0
-            periodSeconds: 5
-            timeoutSeconds: 3
-            failureThreshold: 30  # 30 * 5s = 150s max startup time
+              # ════════════════════════════════════════════
+              # STARTUP PROBE
+              # ════════════════════════════════════════════
+              #
+              # "Has application finished starting?"
+              #
+              # Special probe для slow startup apps
+              #
+              # Purpose:
+              # ✅ Protects slow startup (Liquibase migrations)
+              # ✅ Prevents premature liveness failures
+              # ✅ Allows long initialization
+              # ✅ Enables fast liveness після startup
+              #
+              # How it works:
+              # 1. Startup probe active (liveness disabled)
+              # 2. Checks until succeeds
+              # 3. Once succeeds → Startup complete
+              # 4. Liveness probe takes over
+              #
+              # Timeline:
+              # 0s: Container starts
+              # 0-150s: Startup probe checks (max 30 * 5s)
+              # 150s: Startup succeeds or fails
+              # 150s+: Liveness probe active
+              #
+              # Why needed для Auth Service:
+              # - Liquibase migrations variable time
+              # - First run: Create all tables (30-60s)
+              # - Subsequent: Quick (5-10s)
+              # - Don't want liveness to fail during migration
+
+              httpGet:
+                path: /actuator/health/liveness
+                # ══════════════════════════════════
+                # Startup Endpoint
+                # ══════════════════════════════════
+                #
+                # Same як liveness
+                # Just checks if app responded
+                #
+                # Alternative: Dedicated endpoint
+                # /actuator/health/startup
+                #
+                # Could check:
+                # - Database schema ready
+                # - Migrations complete
+                # - All beans initialized
+
+                port: 8084
+
+              initialDelaySeconds: 0
+              # ═══════════════════════════════════════
+              # Initial Delay
+              # ═══════════════════════════════════════
+              #
+              # Start checking immediately (0s)
+              #
+              # No delay needed:
+              # - Startup probe expects slow start
+              # - Many retries allowed (failureThreshold: 30)
+              # - Can afford to check early
+
+              periodSeconds: 5
+              # ═══════════════════════════════════════
+              # Period
+              # ═══════════════════════════════════════
+              #
+              # Check every 5 seconds
+              #
+              # Frequent checks:
+              # ✅ Detect startup completion quickly
+              # ✅ Enable liveness sooner
+
+              timeoutSeconds: 3
+              # ═══════════════════════════════════════
+              # Timeout
+              # ═══════════════════════════════════════
+              #
+              # 3 seconds timeout
+              #
+              # Same як readiness (reasonable)
+
+              failureThreshold: 30
+              # ═══════════════════════════════════════
+              # Failure Threshold
+              # ═══════════════════════════════════════
+              #
+              # Allow 30 failures before giving up
+              #
+              # Max startup time:
+              # 30 failures * 5s period = 150 seconds
+              #
+              # Timeline:
+              # 0s: First check (fails - still starting)
+              # 5s: Check 2 (fails)
+              # ...
+              # 145s: Check 30 (fails)
+              # 150s: Startup failed → Pod killed
+              #
+              # Why 30:
+              # ✅ Covers slow Liquibase migrations
+              # ✅ Handles variable startup time
+              # ✅ Still fails eventually (not forever)
+              #
+              # If startup completes earlier (60s):
+              # - Check 1-12: Fail (0-60s)
+              # - Check 13: Success! (60s)
+              # - Startup probe stops
+              # - Liveness probe activates
+              #
+              # Benefits:
+              # ✅ Long startup allowed (150s max)
+              # ✅ Fast liveness після startup (10s period)
+              # ✅ Best of both worlds
+
+          # ════════════════════════════════════════════════════════════════
+          # AUTH SERVICE SERVICE
+          # ════════════════════════════════════════════════════════════════
+          #
+          # Kubernetes Service - stable network endpoint для Auth Service
 
 ---
-# Auth Service Service
 
 apiVersion: v1
 kind: Service
 metadata:
+  # ════════════════════════════════════════════════════════
+  # SERVICE METADATA
+  # ════════════════════════════════════════════════════════
+
   name: auth-service
+  # ═══════════════════
+  # Service Name
+  # ═══════════════════
+  #
+  # DNS name для service
+  #
+  # Full DNS:
+  # auth-service.tiles-infra.svc.cluster.local
+  # ├─ auth-service: Service name
+  # ├─ tiles-infra: Namespace
+  # ├─ svc: Service type
+  # └─ cluster.local: Cluster domain
+  #
+  # Short forms (from same namespace):
+  # - auth-service (same namespace)
+  # - auth-service.tiles-infra (cross-namespace)
+  #
+  # Used by:
+  # - Gateway: http://auth-service:8084
+  # - Config Server: http://config-service:8888
+  # - Other services: http://auth-service:8084
+  #
+  # Why stable endpoint:
+  # Pods ephemeral (IPs change):
+  # - Pod dies → New pod, new IP
+  # - Scale up → New pods, new IPs
+  # - Scale down → Pods removed
+  #
+  # Service stable:
+  # - DNS name constant (auth-service)
+  # - IP address stable (ClusterIP)
+  # - Load balances across pods
+  # - Healthy pods only
+
   namespace: tiles-infra
+  # Same namespace як Deployment
+
   labels:
     app: auth-service
     component: backend
+    # Labels для organizational purposes
+    # Not used для selection (selector below)
+
 spec:
+  # ════════════════════════════════════════════════════════
+  # SERVICE SPEC
+  # ════════════════════════════════════════════════════════
+
   type: ClusterIP
+  # ═══════════════════════════════════════════════════════
+  # SERVICE TYPE
+  # ═══════════════════════════════════════════════════════
+  #
+  # How service exposed
+  #
+  # Service Types:
+  # ══════════════
+  #
+  # ClusterIP (this one):
+  # ✅ Internal only (cluster access)
+  # ✅ Stable virtual IP (ClusterIP)
+  # ✅ DNS name (auth-service)
+  # ✅ Load balancing (across pods)
+  # ❌ No external access
+  #
+  # Use cases:
+  # - Backend services (APIs)
+  # - Databases (PostgreSQL, Redis)
+  # - Internal microservices
+  #
+  # Access:
+  # curl http://auth-service.tiles-infra:8084/auth/login
+  # (Only from inside cluster)
+  #
+  # Why ClusterIP для Auth Service:
+  # ✅ Internal service (no direct external access)
+  # ✅ Gateway routes traffic (external → gateway → auth)
+  # ✅ Security (not exposed directly)
+  # ✅ Standard microservices pattern
+  #
+  # ════════════════════════════════════════════════════════
+  #
+  # NodePort:
+  # ✅ Internal + external access
+  # ✅ Port on each node (30000-32767)
+  # ✅ Access via node IP
+  # ❌ Not production-friendly (random ports)
+  #
+  # Example:
+  # type: NodePort
+  # ports:
+  #   - port: 8084
+  #     nodePort: 30084  # Accessible on each node
+  #
+  # Access:
+  # curl http://node-ip:30084/auth/login
+  # (From outside cluster)
+  #
+  # Use cases:
+  # - Development (quick external access)
+  # - Testing (no Ingress setup)
+  # - Legacy apps (fixed ports)
+  #
+  # ❌ Issues:
+  # - Random port range (30000+)
+  # - Manual node IP management
+  # - No load balancing (across nodes)
+  #
+  # ════════════════════════════════════════════════════════
+  #
+  # LoadBalancer:
+  # ✅ External access via cloud LB
+  # ✅ Stable external IP
+  # ✅ Automatic load balancing
+  # ✅ Health checks
+  # ❌ Expensive (one LB per service)
+  #
+  # Example:
+  # type: LoadBalancer
+  # ports:
+  #   - port: 80
+  #     targetPort: 8084
+  #
+  # Access:
+  # curl http://external-ip/auth/login
+  #
+  # Cloud provider creates:
+  # - AWS: Elastic Load Balancer (ELB)
+  # - GCP: Cloud Load Balancer
+  # - Azure: Azure Load Balancer
+  #
+  # Use cases:
+  # - Public APIs (need external IP)
+  # - Single-service apps
+  # - Quick external exposure
+  #
+  # ❌ Issues:
+  # - Expensive (one LB per service)
+  # - No routing (L4 only)
+  # - No TLS termination (do it yourself)
+  #
+  # ════════════════════════════════════════════════════════
+  #
+  # ExternalName:
+  # ✅ CNAME to external service
+  # ✅ Alias external resources
+  # ❌ No proxying (just DNS)
+  #
+  # Example:
+  # type: ExternalName
+  # externalName: api.example.com
+  #
+  # Use cases:
+  # - Access external APIs (via stable name)
+  # - Migration (old → new services)
+  # - Multi-cluster (service в another cluster)
+  #
+  # ════════════════════════════════════════════════════════
+  #
+  # Headless (ClusterIP: None):
+  # ✅ No load balancing
+  # ✅ Direct pod IPs
+  # ✅ DNS returns all pod IPs
+  # ❌ No stable service IP
+  #
+  # Example:
+  # type: ClusterIP
+  # clusterIP: None
+  #
+  # Use cases:
+  # - StatefulSets (direct pod access)
+  # - Custom load balancing
+  # - Peer discovery (pods find each other)
+  #
+  # ════════════════════════════════════════════════════════
+  #
+  # TYPICAL ARCHITECTURE:
+  # ════════════════════
+  #
+  # External traffic:
+  # Internet → Ingress (TLS, routing) → Gateway (ClusterIP)
+  #                                      ↓
+  #                                   Auth Service (ClusterIP)
+  #                                      ↓
+  #                                   PostgreSQL (ClusterIP)
+  #
+  # Why:
+  # ✅ Single entry point (Ingress)
+  # ✅ TLS termination (Ingress)
+  # ✅ Routing (Ingress rules)
+  # ✅ Internal services (ClusterIP)
+  # ✅ Security (no direct exposure)
+  #
+  # ════════════════════════════════════════════════════════
+  #
+  # KIND NOTES:
+  # ══════════
+  #
+  # LoadBalancer в Kind:
+  # - Requires MetalLB або cloud-provider-kind
+  # - Otherwise stuck в Pending
+  #
+  # NodePort в Kind:
+  # - Works out of box
+  # - Access via localhost:nodePort
+  #
+  # ClusterIP в Kind:
+  # - Internal only (default)
+  # - Access via port-forward:
+  #   kubectl port-forward svc/auth-service 8084:8084
+  #   curl http://localhost:8084/auth/login
 
   selector:
+    # ════════════════════════════════════════════════════════
+    # POD SELECTOR
+    # ════════════════════════════════════════════════════════
+    #
+    # Which pods receive traffic від this service
+    #
+    # Service finds pods з matching labels
+    #
+    # Process:
+    # 1. Service created з selector
+    # 2. K8s finds pods з labels: app=auth-service
+    # 3. Creates Endpoints list (pod IPs + ports)
+    # 4. Traffic sent to Endpoints (load balanced)
+    #
+    # Example:
+    # Deployment creates 2 pods:
+    # - Pod 1: IP 10.1.1.5, labels: app=auth-service
+    # - Pod 2: IP 10.1.1.6, labels: app=auth-service
+    #
+    # Service endpoints:
+    # - 10.1.1.5:8084
+    # - 10.1.1.6:8084
+    #
+    # Traffic distribution:
+    # Request 1 → 10.1.1.5:8084 (Pod 1)
+    # Request 2 → 10.1.1.6:8084 (Pod 2)
+    # Request 3 → 10.1.1.5:8084 (Pod 1)
+    # → Round-robin load balancing
+    #
+    # MUST MATCH:
+    # Deployment template.metadata.labels
+    #
+    # Deployment:
+    # template:
+    #   metadata:
+    #     labels:
+    #       app: auth-service  ← Must match
+    #
+    # Service:
+    # selector:
+    #   app: auth-service  ← Must match
+    #
+    # If mismatch:
+    # - Service created (no error)
+    # - No endpoints (empty list)
+    # - Traffic fails (no destination)
+    #
+    # Check endpoints:
+    # kubectl get endpoints auth-service
+    # → Should show pod IPs
+    #
+    # Empty endpoints:
+    # NAME            ENDPOINTS   AGE
+    # auth-service    <none>      5m
+    # → Check label matching!
+
     app: auth-service
+    # ═══════════════════════════════════════
+    # Primary Selector
+    # ═══════════════════════════════════════
+    #
+    # Matches pods з label: app=auth-service
+    #
+    # Simple selector (one label):
+    # ✅ Easy to understand
+    # ✅ Works для most cases
+    # ✅ Matches all auth-service pods
+    #
+    # Multiple labels (more specific):
+    # selector:
+    #   app: auth-service
+    #   version: v1
+    #   environment: prod
+    #
+    # Matches ONLY pods з ALL labels:
+    # ✅ Fine-grained control
+    # ✅ Blue-green deployments
+    # ✅ A/B testing
+    # ❌ More complex
+    #
+    # Our case: Single label sufficient
+    # All auth-service pods receive traffic
 
   ports:
-    - port: 8084
-      targetPort: 8084
-      protocol: TCP
-      name: http
+    # ════════════════════════════════════════════════════════
+    # SERVICE PORTS
+    # ════════════════════════════════════════════════════════
+    #
+    # Port mappings (service port → pod port)
+    #
+    # Can define multiple ports:
+    # - port: 80, targetPort: 8080 (HTTP)
+    # - port: 443, targetPort: 8443 (HTTPS)
+    # - port: 9090, targetPort: 9090 (Metrics)
 
-  # Session affinity НЕ потрібна (stateless JWT auth)
+    - port: 8084
+      # ═══════════════════════════════════════
+      # Service Port
+      # ═══════════════════════════════════════
+      #
+      # Port where service listens
+      #
+      # Clients connect to:
+      # http://auth-service:8084
+      #            service name ↑    ↑ service port
+      #
+      # This is the "public" port (within cluster)
+      #
+      # Can differ від container port:
+      # - port: 80 (service)
+      # - targetPort: 8080 (container)
+      # → http://service:80 → container:8080
+      #
+      # Why same port (8084):
+      # ✅ Simple (no confusion)
+      # ✅ Consistent (same port everywhere)
+      # ✅ Clear mapping (8084 → 8084)
+      #
+      # When to differ:
+      # - Standard ports (80 HTTP, 443 HTTPS)
+      # - Port conflicts (multiple services)
+      # - Legacy reasons (can't change app)
+
+      targetPort: 8084
+      # ═══════════════════════════════════════
+      # Target Port (Container Port)
+      # ═══════════════════════════════════════
+      #
+      # Port on pod/container
+      #
+      # Where application actually listens
+      # server.port=8084 (application.yml)
+      #
+      # Can be:
+      # - Number: 8084
+      # - Name: http (references containerPort name)
+      #
+      # Using name (better):
+      # Container:
+      # ports:
+      #   - containerPort: 8084
+      #     name: http
+      #
+      # Service:
+      # ports:
+      #   - port: 80
+      #     targetPort: http  ← References name
+      #
+      # Benefits:
+      # ✅ Change container port (update one place)
+      # ✅ Self-documenting (clear purpose)
+      # ✅ Multiple containers (same name, different port)
+      #
+      # Traffic flow:
+      # Client → Service:8084 → Pod:8084 → Container:8084
+      #
+      # Load balancing:
+      # Request → Service:8084
+      #          ↓
+      #          ├→ Pod 1 (10.1.1.5:8084)
+      #          ├→ Pod 2 (10.1.1.6:8084)
+      #          └→ Pod 3 (10.1.1.7:8084)
+
+      protocol: TCP
+      # ═══════════════════════════════════════
+      # Protocol
+      # ═══════════════════════════════════════
+      #
+      # Network protocol
+      #
+      # TCP (default):
+      # - Reliable delivery
+      # - Connection-oriented
+      # - HTTP, HTTPS, gRPC
+      #
+      # UDP:
+      # - Unreliable (faster)
+      # - Connectionless
+      # - DNS, streaming
+      #
+      # SCTP:
+      # - Advanced (rarely used)
+      # - Multi-homing
+      # - Telecom
+
+      name: http
+      # ═══════════════════════════════════════
+      # Port Name
+      # ═══════════════════════════════════════
+      #
+      # Named port (optional)
+      #
+      # Benefits:
+      # ✅ Self-documenting (clear purpose)
+      # ✅ Prometheus discovery (port=http)
+      # ✅ Network policies (allow http)
+      # ✅ Ingress rules (backend=http)
+      #
+      # Common names:
+      # - http, https (web traffic)
+      # - grpc (gRPC services)
+      # - metrics (Prometheus)
+      # - health (health checks)
+      # - admin (admin interface)
+      #
+      # Multiple ports example:
+      # ports:
+      #   - port: 8084
+      #     name: http
+      #   - port: 9090
+      #     name: metrics
+      #   - port: 8085
+      #     name: admin
+
   sessionAffinity: None
+  # ════════════════════════════════════════════════════════
+  # SESSION AFFINITY
+  # ════════════════════════════════════════════════════════
+  #
+  # Sticky sessions (session persistence)
+  #
+  # Options:
+  # ════════
+  #
+  # None (default):
+  # ✅ No session affinity
+  # ✅ Random load balancing
+  # ✅ Requests from same client → different pods
+  #
+  # Load balancing:
+  # Client A, Request 1 → Pod 1
+  # Client A, Request 2 → Pod 2
+  # Client A, Request 3 → Pod 1
+  # → Random distribution
+  #
+  # Benefits:
+  # ✅ Best load distribution
+  # ✅ No hot spots (one pod overloaded)
+  # ✅ Stateless apps (no session data в pods)
+  #
+  # Use cases:
+  # - Stateless APIs (JWT auth)
+  # - Microservices (no server state)
+  # - Modern apps (session в Redis/DB)
+  #
+  # ════════════════════════════════════════════════════════
+  #
+  # ClientIP:
+  # ✅ Session affinity enabled
+  # ✅ Same client IP → same pod
+  # ✅ Sticky sessions
+  #
+  # Configuration:
+  # sessionAffinity: ClientIP
+  # sessionAffinityConfig:
+  #   clientIP:
+  #     timeoutSeconds: 10800  # 3 hours
+  #
+  # Load balancing:
+  # Client A (IP: 1.2.3.4):
+  #   Request 1 → Pod 1
+  #   Request 2 → Pod 1  ← Same pod
+  #   Request 3 → Pod 1  ← Same pod
+  #
+  # Client B (IP: 5.6.7.8):
+  #   Request 1 → Pod 2
+  #   Request 2 → Pod 2  ← Same pod
+  #
+  # Benefits:
+  # ✅ Session preserved (same pod)
+  # ✅ No session replication needed
+  # ✅ Better caching (data locality)
+  #
+  # Drawbacks:
+  # ❌ Uneven load (hot clients)
+  # ❌ Not resilient (pod dies → session lost)
+  # ❌ Behind NAT (many clients, same IP)
+  #
+  # Use cases:
+  # - Legacy apps (server-side sessions)
+  # - WebSocket connections (persistent)
+  # - Stateful protocols (FTP, RTMP)
+  #
+  # ════════════════════════════════════════════════════════
+  #
+  # WHY None FOR AUTH SERVICE:
+  # ═════════════════════════
+  #
+  # Auth Service = Stateless:
+  # ✅ JWT tokens (no server sessions)
+  # ✅ Refresh tokens в Redis (shared)
+  # ✅ No in-memory state
+  # ✅ Can route to any pod
+  #
+  # Benefits:
+  # ✅ Perfect load balancing
+  # ✅ High availability (pod dies, others serve)
+  # ✅ Easy scaling (add/remove pods)
+  # ✅ Rolling updates (zero downtime)
+  #
+  # Stateless authentication:
+  # 1. Client sends request з JWT
+  # 2. Any pod can validate (public key)
+  # 3. No need same pod (stateless)
+  #
+  # Refresh tokens:
+  # 1. Client sends refresh token
+  # 2. Any pod checks Redis (shared storage)
+  # 3. Returns new tokens
+  #
+  # If stateful:
+  # ❌ Session в pod memory
+  # ❌ Must route to same pod
+  # ❌ sessionAffinity: ClientIP needed
+  # ❌ Poor scalability
+  #
+  # ════════════════════════════════════════════════════════
+  #
+  # ALTERNATIVES (not в Service):
+  # ════════════════════════════
+  #
+  # Application-level affinity:
+  # - Consistent hashing (user ID → pod)
+  # - Custom routing (API Gateway)
+  # - Session replication (Hazelcast, Redis)
+  #
+  # Ingress-level affinity:
+  # - Cookie-based sticky sessions
+  # - Ingress annotations (NGINX)
+  # - Better than IP-based (behind NAT)
+  #
+  # Example (NGINX Ingress):
+  # annotations:
+  #   nginx.ingress.kubernetes.io/affinity: "cookie"
+  #   nginx.ingress.kubernetes.io/session-cookie-name: "route"
+  #   nginx.ingress.kubernetes.io/session-cookie-expires: "172800"
+  #   nginx.ingress.kubernetes.io/session-cookie-max-age: "172800"
+  #
+  # Benefits:
+  # ✅ Cookie-based (works за NAT)
+  # ✅ Survives IP changes
+  # ✅ More reliable

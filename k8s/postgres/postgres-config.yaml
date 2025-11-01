@@ -1,33 +1,1110 @@
-# PostgreSQL ConfigMap
-# Non-sensitive configuration для Auth Service PostgreSQL
+# ════════════════════════════════════════════════════════════════
+# POSTGRESQL CONFIGMAP
+# ════════════════════════════════════════════════════════════════
+#
+# Non-sensitive configuration для PostgreSQL
+#
+# ConfigMap vs Secret:
+# ═══════════════════
+# ConfigMap: Non-sensitive data (usernames, database names, URLs)
+# Secret: Sensitive data (passwords, tokens, keys)
+#
+# This ConfigMap contains:
+# ✅ Database name (public info)
+# ✅ Database user (public info)
+# ✅ Performance settings (tuning params)
+# ✅ Logging config (operational settings)
+#
+# Does NOT contain:
+# ❌ Passwords (use Secret)
+# ❌ Private keys (use Secret)
+# ❌ API tokens (use Secret)
 
 apiVersion: v1
 kind: ConfigMap
+# ═══════════════
+# ConfigMap
+# ═══════════════
+#
+# Key-value configuration storage
+#
+# Features:
+# ✅ Non-sensitive data
+# ✅ Easy updates (kubectl edit)
+# ✅ Mount as files або env vars
+# ✅ Share між pods
+# ✅ Version control friendly
+#
+# Size limit: 1MB per ConfigMap
+# (Kubernetes etcd limit)
+#
+# Use cases:
+# - Application config (properties)
+# - Database settings (tuning)
+# - Feature flags (enable/disable)
+# - Environment URLs (API endpoints)
+
 metadata:
   name: auth-postgres-config
+  # ═══════════════════════════════════
+  # ConfigMap Name
+  # ═══════════════════════════════════
+  #
+  # Referenced в Deployment:
+  # env:
+  #   - name: POSTGRES_DB
+  #     valueFrom:
+  #       configMapKeyRef:
+  #         name: auth-postgres-config  ← This
+  #         key: POSTGRES_DB
+
   namespace: tiles-infra
+
   labels:
     app: auth-postgres
     component: database
+
 data:
-  # Database name
+  # ════════════════════════════════════════════════════════
+  # DATA
+  # ════════════════════════════════════════════════════════
+  #
+  # Key-value pairs (all strings)
+  #
+  # Unlike Secret:
+  # - Plain text (no base64 encoding)
+  # - Human-readable
+  # - Easy to edit
+  #
+  # All values must be strings:
+  # ✅ "100" (number as string)
+  # ✅ "true" (boolean as string)
+  # ❌ 100 (bare number - invalid YAML)
+  # ❌ true (bare boolean - invalid YAML)
+
   POSTGRES_DB: auth_db
+  # ═══════════════════════════════════════════════════════
+  # DATABASE NAME
+  # ═══════════════════════════════════════════════════════
+  #
+  # Name of database to create
+  #
+  # Naming conventions:
+  # ✅ Lowercase (PostgreSQL converts anyway)
+  # ✅ Underscores (not hyphens)
+  # ✅ Descriptive (service_db)
+  # ✅ ASCII only (avoid Unicode)
+  #
+  # Examples:
+  # ✅ auth_db (this)
+  # ✅ user_service_db
+  # ✅ analytics_db
+  # ❌ Auth-DB (hyphens problematic)
+  # ❌ authdb (less readable)
+  # ❌ MyAuthDB (mixed case converted)
+  #
+  # PostgreSQL behavior:
+  # - Names case-insensitive (unless quoted)
+  # - auth_db = Auth_Db = AUTH_DB
+  # - "auth_db" ≠ "Auth_Db" (quoted preserves case)
+  #
+  # Best practice: Always lowercase
+  #
+  # Database creation:
+  # PostgreSQL Docker image:
+  # 1. Checks if PGDATA exists
+  # 2. If empty, runs initdb
+  # 3. Creates database: $POSTGRES_DB
+  # 4. Creates user: $POSTGRES_USER
+  # 5. Grants all privileges
+  #
+  # SQL equivalent:
+  # CREATE DATABASE auth_db
+  #   OWNER auth_user
+  #   ENCODING 'UTF8'
+  #   LC_COLLATE 'en_US.utf8'
+  #   LC_CTYPE 'en_US.utf8'
+  #   TEMPLATE template0;
+  #
+  # GRANT ALL PRIVILEGES ON DATABASE auth_db TO auth_user;
+  #
+  # Multiple databases:
+  # Only ONE created automatically (POSTGRES_DB)
+  #
+  # Create additional databases:
+  # /docker-entrypoint-initdb.d/init.sql:
+  # CREATE DATABASE sessions_db;
+  # CREATE DATABASE analytics_db;
+  #
+  # або:
+  # kubectl exec -it auth-postgres-xxx -- psql -U auth_user
+  # CREATE DATABASE new_db;
+  #
+  # Schema structure:
+  # auth_db
+  # ├── public (default schema)
+  # │   ├── users (table)
+  # │   ├── roles (table)
+  # │   └── user_roles (table)
+  # └── extensions
+  #     └── uuid-ossp (UUID generation)
+  #
+  # Connection string uses:
+  # jdbc:postgresql://auth-postgres:5432/auth_db
+  #                                         ↑
+  #                                    Database name
+  #
+  # Why same name everywhere:
+  # ✅ Consistency (no confusion)
+  # ✅ Easy to trace (grep auth_db)
+  # ✅ Clear purpose (auth service database)
 
-  # Database user
   POSTGRES_USER: auth_user
+  # ═══════════════════════════════════════════════════════
+  # DATABASE USER
+  # ═══════════════════════════════════════════════════════
+  #
+  # Initial superuser to create
+  #
+  # Naming conventions:
+  # ✅ Lowercase (consistent з database)
+  # ✅ Descriptive (service_user)
+  # ✅ Not "postgres" (default admin)
+  # ✅ Underscores (not hyphens)
+  #
+  # Examples:
+  # ✅ auth_user (this)
+  # ✅ app_user
+  # ✅ api_user
+  # ❌ postgres (default, avoid)
+  # ❌ admin (too generic)
+  # ❌ root (confusing з OS user)
+  #
+  # User creation:
+  # PostgreSQL Docker image:
+  # CREATE USER auth_user WITH
+  #   SUPERUSER
+  #   CREATEDB
+  #   CREATEROLE
+  #   INHERIT
+  #   LOGIN
+  #   REPLICATION
+  #   PASSWORD 'xxx';
+  #
+  # Superuser privileges:
+  # ✅ CREATE/DROP DATABASE
+  # ✅ CREATE/DROP ROLE
+  # ✅ Modify system catalogs
+  # ✅ Execute any function
+  # ✅ Access any table
+  #
+  # ⚠️  PRODUCTION SECURITY:
+  # Application should NOT use superuser!
+  #
+  # Better approach:
+  # ══════════════
+  # 1. Setup user (superuser для migrations):
+  #    POSTGRES_USER=postgres
+  #
+  # 2. Application user (limited privileges):
+  #    CREATE USER app_user WITH PASSWORD 'xxx';
+  #    GRANT CONNECT ON DATABASE auth_db TO app_user;
+  #    GRANT USAGE ON SCHEMA public TO app_user;
+  #    GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO app_user;
+  #    GRANT USAGE ON ALL SEQUENCES IN SCHEMA public TO app_user;
+  #
+  # 3. Migration user (schema changes):
+  #    CREATE USER migration_user WITH PASSWORD 'xxx';
+  #    GRANT CREATE ON SCHEMA public TO migration_user;
+  #    GRANT ALL ON ALL TABLES IN SCHEMA public TO migration_user;
+  #
+  # 4. Application connects:
+  #    spring.datasource.username=app_user
+  #
+  # Benefits:
+  # ✅ Least privilege (app can't drop tables)
+  # ✅ Audit trail (separate users)
+  # ✅ Security (limit damage)
+  # ✅ Compliance (role separation)
+  #
+  # User roles:
+  # ═══════════
+  # PostgreSQL supports:
+  # - Users (can login)
+  # - Roles (groups of privileges)
+  # - Group roles (role membership)
+  #
+  # Example:
+  # CREATE ROLE readonly;
+  # GRANT SELECT ON ALL TABLES TO readonly;
+  #
+  # CREATE USER analyst WITH PASSWORD 'xxx';
+  # GRANT readonly TO analyst;
+  #
+  # Query current user:
+  # SELECT current_user;
+  # → auth_user
+  #
+  # List all users:
+  # \du
+  # → Shows all roles і privileges
+  #
+  # Connection uses:
+  # psql -U auth_user -d auth_db
+  # jdbc:postgresql://auth-postgres:5432/auth_db?user=auth_user
+  #
+  # Authentication:
+  # pg_hba.conf determines auth method:
+  # host  all  auth_user  0.0.0.0/0  md5
+  # → Requires password (from POSTGRES_PASSWORD)
 
-  # PostgreSQL performance tuning
-  # These values suitable для small/medium workloads
+  # ════════════════════════════════════════════════════════
+  # POSTGRESQL PERFORMANCE TUNING
+  # ════════════════════════════════════════════════════════
+  #
+  # Optional configuration (not used by default)
+  #
+  # These settings can be:
+  # 1. Set via ConfigMap (documented)
+  # 2. Applied via custom postgresql.conf
+  # 3. Set via environment variables (POSTGRES_*)
+  # 4. Changed at runtime (ALTER SYSTEM)
+  #
+  # To use these settings:
+  # Mount ConfigMap as postgresql.conf
+  # або set POSTGRES_INITDB_ARGS
+  #
+  # Current config: Documentation only
+  # Default PostgreSQL settings used
+
   max_connections: "100"
+  # ═══════════════════════════════════════════════════════
+  # MAX CONNECTIONS
+  # ═══════════════════════════════════════════════════════
+  #
+  # Maximum concurrent database connections
+  #
+  # Default: 100 (PostgreSQL default)
+  #
+  # Each connection uses:
+  # - Memory: ~5-10MB per connection
+  # - File descriptors: 1-2 per connection
+  # - Backend process: 1 per connection
+  #
+  # Memory calculation:
+  # 100 connections * 10MB = 1GB memory
+  # Plus shared_buffers (128MB)
+  # Plus work_mem per query (4MB * active queries)
+  # Total: ~1.5-2GB
+  #
+  # Connection types:
+  # ═══════════════
+  # Active connections:
+  # - Executing queries
+  # - Holding locks
+  # - Using memory
+  #
+  # Idle connections:
+  # - Connection open але no query
+  # - Minimal resources
+  # - Still count toward limit
+  #
+  # Idle in transaction:
+  # - Transaction started але no activity
+  # - Holds locks (blocks other queries)
+  # - Should be closed quickly
+  #
+  # Query connections:
+  # SELECT count(*), state FROM pg_stat_activity
+  # GROUP BY state;
+  #
+  # Result:
+  # count | state
+  # ------+------------------
+  #   5   | active
+  #   20  | idle
+  #   2   | idle in transaction
+  #
+  # Sizing recommendations:
+  # ═════════════════════
+  # Small app (dev/test):
+  # - max_connections: 100 (default)
+  # - Typical usage: 5-10 connections
+  # - Auth service: 2 pods * 10 pool = 20 connections
+  #
+  # Medium app:
+  # - max_connections: 200-500
+  # - Multiple services connecting
+  # - Connection pooling (PgBouncer)
+  #
+  # Large app:
+  # - max_connections: 500-1000
+  # - Many services
+  # - External connection pooler required
+  # - Consider read replicas
+  #
+  # Connection pooling:
+  # ══════════════════
+  # Application level (HikariCP):
+  # spring.datasource.hikari.maximum-pool-size=10
+  # → Each pod: Max 10 connections
+  # → 2 pods: Max 20 connections total
+  #
+  # Database level (PgBouncer):
+  # - Sits between app і database
+  # - Multiplexes connections
+  # - 1000 app connections → 100 DB connections
+  # - Reduces database load
+  #
+  # Why use PgBouncer:
+  # ✅ More app connections (pool multiplexing)
+  # ✅ Less DB memory (fewer backends)
+  # ✅ Faster connections (connection reuse)
+  # ✅ Better performance
+  #
+  # Deployment з PgBouncer:
+  # apiVersion: v1
+  # kind: ConfigMap
+  # metadata:
+  #   name: pgbouncer-config
+  # data:
+  #   pgbouncer.ini: |
+  #     [databases]
+  #     auth_db = host=auth-postgres port=5432
+  #
+  #     [pgbouncer]
+  #     listen_port = 6432
+  #     listen_addr = *
+  #     pool_mode = transaction
+  #     max_client_conn = 1000
+  #     default_pool_size = 25
+  #
+  # Application connects:
+  # jdbc:postgresql://pgbouncer:6432/auth_db
+  #                    ↑ PgBouncer, not direct PostgreSQL
+  #
+  # Monitoring:
+  # ══════════
+  # Check connection usage:
+  # SELECT max_conn, used, res_for_super
+  # FROM (
+  #   SELECT count(*) used FROM pg_stat_activity
+  # ) t1,
+  # (
+  #   SELECT setting::int res_for_super FROM pg_settings WHERE name='superuser_reserved_connections'
+  # ) t2,
+  # (
+  #   SELECT setting::int max_conn FROM pg_settings WHERE name='max_connections'
+  # ) t3;
+  #
+  # Warning threshold:
+  # IF used > max_conn * 0.8 THEN
+  #   "WARNING: 80% connections used"
+  # END IF
+  #
+  # Too many connections error:
+  # FATAL: sorry, too many clients already
+  # → Increase max_connections або add pooling
+
   shared_buffers: "128MB"
+  # ═══════════════════════════════════════════════════════
+  # SHARED BUFFERS
+  # ═══════════════════════════════════════════════════════
+  #
+  # PostgreSQL shared memory для caching data
+  #
+  # Default: 128MB (PostgreSQL default)
+  #
+  # Purpose:
+  # - Cache frequently accessed data
+  # - Cache indexes
+  # - Reduce disk I/O
+  # - Improve query performance
+  #
+  # How it works:
+  # ═══════════
+  # 1. Query reads data
+  # 2. PostgreSQL checks shared_buffers (cache)
+  # 3. If в cache → Return immediately (fast)
+  # 4. If not в cache → Read від disk (slow)
+  # 5. Store в shared_buffers (future queries fast)
+  #
+  # Cache hierarchy:
+  # Query → shared_buffers (PostgreSQL)
+  #      → OS page cache (kernel)
+  #      → Disk (SSD/HDD)
+  #
+  # Sizing recommendations:
+  # ═════════════════════
+  # Rule of thumb: 25% of system memory
+  #
+  # Small system (1GB RAM):
+  # - shared_buffers: 256MB (25%)
+  #
+  # Medium system (4GB RAM):
+  # - shared_buffers: 1GB (25%)
+  #
+  # Large system (16GB RAM):
+  # - shared_buffers: 4GB (25%)
+  #
+  # Very large system (64GB+ RAM):
+  # - shared_buffers: 8-16GB (not more)
+  # - Diminishing returns above 8GB
+  # - OS cache more efficient
+  #
+  # Our config (256Mi memory limit):
+  # - shared_buffers: 128MB (50%)
+  # - Higher percentage OK (small database)
+  # - Leaves 128MB для other memory
+  #
+  # Memory breakdown:
+  # Total: 256Mi
+  # ├── shared_buffers: 128MB (50%)
+  # ├── work_mem * queries: 4MB * 5 = 20MB
+  # ├── maintenance_work_mem: 64MB
+  # ├── PostgreSQL processes: 30MB
+  # └── OS і buffers: 34MB
+  #
+  # Monitoring:
+  # ══════════
+  # Check buffer hit ratio:
+  # SELECT
+  #   sum(heap_blks_read) as heap_read,
+  #   sum(heap_blks_hit) as heap_hit,
+  #   sum(heap_blks_hit) / (sum(heap_blks_hit) + sum(heap_blks_read)) as ratio
+  # FROM pg_statio_user_tables;
+  #
+  # Good ratio: > 0.99 (99% cache hits)
+  # OK ratio: 0.90-0.99 (90-99%)
+  # Bad ratio: < 0.90 (increase shared_buffers)
+  #
+  # Configuration:
+  # postgresql.conf:
+  # shared_buffers = 128MB
+  #
+  # або SQL:
+  # ALTER SYSTEM SET shared_buffers = '128MB';
+  # SELECT pg_reload_conf(); -- Reload config
+  #
+  # ⚠️  Requires PostgreSQL restart (cannot change live)
+
   effective_cache_size: "256MB"
+  # ═══════════════════════════════════════════════════════
+  # EFFECTIVE CACHE SIZE
+  # ═══════════════════════════════════════════════════════
+  #
+  # Estimate of memory available для disk caching
+  #
+  # NOT actual memory allocation!
+  # Just a hint для query planner
+  #
+  # Purpose:
+  # Query planner uses this to decide:
+  # - Use index або sequential scan?
+  # - How many rows likely в cache?
+  # - Cost of different query plans
+  #
+  # Sizing:
+  # ══════
+  # Rule of thumb: 50-75% of system RAM
+  #
+  # Small system (1GB RAM):
+  # - effective_cache_size: 512MB-768MB
+  #
+  # Medium system (4GB RAM):
+  # - effective_cache_size: 2-3GB
+  #
+  # Large system (16GB RAM):
+  # - effective_cache_size: 8-12GB
+  #
+  # Our config (1Gi memory limit):
+  # - effective_cache_size: 256MB (25%)
+  # - Conservative (account для other processes)
+  #
+  # Calculation:
+  # Total memory: 1Gi (limit)
+  # shared_buffers: 128MB (PostgreSQL cache)
+  # OS cache: ~128MB (kernel page cache)
+  # Total cache: 256MB
+  #
+  # Effect on queries:
+  # ═════════════════
+  # Example: Find user by ID
+  #
+  # Low effective_cache_size (64MB):
+  # Planner thinks: "Index probably not в cache"
+  # Decision: Sequential scan (read all rows)
+  # Cost estimate: High
+  #
+  # High effective_cache_size (1GB):
+  # Planner thinks: "Index likely в cache"
+  # Decision: Index scan (read specific rows)
+  # Cost estimate: Low
+  #
+  # Query plan:
+  # EXPLAIN SELECT * FROM users WHERE id = 123;
+  #
+  # Low cache:
+  # Seq Scan on users  (cost=0.00..1245.00)
+  # → Full table scan
+  #
+  # High cache:
+  # Index Scan using users_pkey on users  (cost=0.29..8.31)
+  # → Index lookup (faster)
+  #
+  # ⚠️  Does NOT affect:
+  # - Actual memory usage (just a hint)
+  # - Cache size (that's shared_buffers)
+  # - Query correctness (only performance)
+  #
+  # Monitoring:
+  # Not directly monitorable (it's a hint)
+  # Monitor query plans instead (EXPLAIN ANALYZE)
+
   work_mem: "4MB"
+  # ═══════════════════════════════════════════════════════
+  # WORK MEMORY
+  # ═══════════════════════════════════════════════════════
+  #
+  # Memory для query operations (per operation!)
+  #
+  # Default: 4MB (PostgreSQL default)
+  #
+  # Used for:
+  # - Sorting (ORDER BY)
+  # - Hash tables (JOIN)
+  # - Bitmap operations (bitmap index scans)
+  # - Grouping (GROUP BY)
+  # - Aggregates (SUM, COUNT)
+  #
+  # ⚠️  PER OPERATION (not per query!)
+  #
+  # Memory calculation:
+  # ═════════════════
+  # Complex query:
+  # SELECT u.username, COUNT(*)
+  # FROM users u
+  # JOIN user_roles ur ON u.id = ur.user_id
+  # GROUP BY u.username
+  # ORDER BY COUNT(*) DESC;
+  #
+  # Operations:
+  # 1. Hash join: 4MB (user_roles hash table)
+  # 2. GroupAggregate: 4MB (group by username)
+  # 3. Sort: 4MB (order by count)
+  # Total: 12MB для ONE query
+  #
+  # Multiple queries:
+  # 5 concurrent queries * 12MB = 60MB total
+  #
+  # Total work_mem usage:
+  # = work_mem * operations * concurrent_queries
+  # = 4MB * 3 * 5 = 60MB
+  #
+  # ⚠️  Can exceed memory limits!
+  #
+  # Sizing guidelines:
+  # ═════════════════
+  # Formula:
+  # work_mem = (Total RAM - shared_buffers) / (max_connections * 3)
+  #
+  # Our system:
+  # work_mem = (256MB - 128MB) / (100 * 3)
+  #          = 128MB / 300
+  #          = 0.4MB
+  #
+  # But we set 4MB (more generous):
+  # - Not all connections active simultaneously
+  # - Most queries simple (< 3 operations)
+  # - Better query performance
+  #
+  # Low work_mem consequences:
+  # ═════════════════════════
+  # If operation needs more than work_mem:
+  # → Spills to disk (temp files)
+  # → Much slower (disk I/O)
+  #
+  # Example:
+  # work_mem = 1MB
+  # Sort needs 5MB
+  # → Creates temp file: /var/lib/postgresql/data/base/pgsql_tmp/
+  # → Sorts on disk (100x slower)
+  #
+  # Check temp file usage:
+  # SELECT temp_files, temp_bytes
+  # FROM pg_stat_database
+  # WHERE datname = 'auth_db';
+  #
+  # If temp_files > 0:
+  # → Increase work_mem (queries spilling)
+  #
+  # High work_mem risks:
+  # ═══════════════════
+  # work_mem = 100MB
+  # 50 concurrent queries * 3 operations = 15GB
+  # → OOM kill (exceeds memory limit)
+  #
+  # Best practices:
+  # ══════════════
+  # - Start low (4MB)
+  # - Monitor temp file usage
+  # - Increase если spilling
+  # - Set per-query если needed:
+  #   SET work_mem = '50MB';
+  #   SELECT ... complex query ...;
+  #   RESET work_mem;
+  #
+  # Session-level tuning:
+  # ALTER USER analytics_user SET work_mem = '50MB';
+  # → Analytics queries get more memory
+
   maintenance_work_mem: "64MB"
+  # ═══════════════════════════════════════════════════════
+  # MAINTENANCE WORK MEMORY
+  # ═══════════════════════════════════════════════════════
+  #
+  # Memory для maintenance operations
+  #
+  # Default: 64MB (PostgreSQL default)
+  #
+  # Used for:
+  # - VACUUM (cleanup dead rows)
+  # - CREATE INDEX (build indexes)
+  # - ALTER TABLE ADD FOREIGN KEY (validate constraint)
+  # - ANALYZE (update statistics)
+  # - Autovacuum workers
+  #
+  # NOT used for:
+  # - Regular queries (that's work_mem)
+  # - Connections (that's shared_buffers)
+  #
+  # Sizing:
+  # ══════
+  # Rule of thumb: 5-10% of RAM або 50MB+
+  #
+  # Small system (1GB):
+  # - maintenance_work_mem: 64MB
+  #
+  # Medium system (4GB):
+  # - maintenance_work_mem: 256MB
+  #
+  # Large system (16GB):
+  # - maintenance_work_mem: 1GB
+  #
+  # Our config (256Mi limit):
+  # - maintenance_work_mem: 64MB (25%)
+  # - Higher percentage OK (small database)
+  #
+  # Operations impact:
+  # ════════════════
+  #
+  # VACUUM:
+  # - Low memory: Slower vacuum (multiple passes)
+  # - High memory: Faster vacuum (one pass)
+  #
+  # Example:
+  # maintenance_work_mem = 10MB
+  # Table size: 100MB dead rows
+  # → 10 passes (10MB at a time)
+  # → Slow (holds locks longer)
+  #
+  # maintenance_work_mem = 150MB
+  # Table size: 100MB dead rows
+  # → 1 pass (all at once)
+  # → Fast (shorter lock time)
+  #
+  # CREATE INDEX:
+  # - Low memory: Slower index build (external sort)
+  # - High memory: Faster build (in-memory sort)
+  #
+  # Example:
+  # CREATE INDEX idx_username ON users(username);
+  #
+  # Low memory (10MB):
+  # - Sorts on disk
+  # - Creates temp files
+  # - Time: 10 seconds
+  #
+  # High memory (100MB):
+  # - Sorts в memory
+  # - No temp files
+  # - Time: 2 seconds
+  #
+  # Autovacuum:
+  # Each autovacuum worker uses maintenance_work_mem
+  # 3 workers * 64MB = 192MB total
+  #
+  # Max autovacuum memory:
+  # = maintenance_work_mem * autovacuum_max_workers
+  # = 64MB * 3 = 192MB
+  #
+  # Monitoring:
+  # ══════════
+  # Check vacuum progress:
+  # SELECT * FROM pg_stat_progress_vacuum;
+  #
+  # Check index creation:
+  # SELECT * FROM pg_stat_progress_create_index;
+  #
+  # If slow:
+  # → Increase maintenance_work_mem
+  #
+  # Per-operation tuning:
+  # SET maintenance_work_mem = '256MB';
+  # CREATE INDEX idx_large_table ON large_table(column);
+  # RESET maintenance_work_mem;
 
-  # Logging
-  log_statement: "none"  # Don't log statements (performance)
+  # ════════════════════════════════════════════════════════
+  # LOGGING CONFIGURATION
+  # ════════════════════════════════════════════════════════
+
+  log_statement: "none"
+  # ═══════════════════════════════════════════════════════
+  # LOG STATEMENT
+  # ═══════════════════════════════════════════════════════
+  #
+  # What SQL statements to log
+  #
+  # Options:
+  # ═══════
+  #
+  # none (this):
+  # ❌ No SQL logging
+  # ✅ Better performance (no logging overhead)
+  # ✅ Less disk usage (no log files)
+  # ✅ Production default
+  #
+  # ddl:
+  # ✅ Log DDL only (CREATE, ALTER, DROP)
+  # ❌ No DML (INSERT, UPDATE, DELETE, SELECT)
+  # ✅ Track schema changes
+  #
+  # mod:
+  # ✅ Log data modifications (INSERT, UPDATE, DELETE)
+  # ❌ No SELECT
+  # ✅ Audit data changes
+  #
+  # all:
+  # ✅ Log ALL statements (DDL, DML, SELECT)
+  # ⚠️  Very verbose (huge logs)
+  # ⚠️  Performance impact
+  # ⚠️  Disk space usage
+  # ✅ Debugging only
+  #
+  # Why "none":
+  # ══════════
+  # Performance:
+  # - No log writes (faster queries)
+  # - Less I/O (better throughput)
+  # - Smaller logs (less disk)
+  #
+  # Security:
+  # - Passwords may be logged (CREATE USER)
+  # - Personal data logged (SELECT *)
+  # - Sensitive queries exposed
+  #
+  # Alternative logging:
+  # ══════════════════
+  # Application logging:
+  # - Spring Boot logs SQL (if enabled)
+  # - More control (filter sensitive data)
+  # - Structured logging (JSON)
+  #
+  # Query monitoring:
+  # - pg_stat_statements extension
+  # - Aggregated query stats (no raw SQL)
+  # - Performance metrics
+  # - No sensitive data
+  #
+  # Enable pg_stat_statements:
+  # CREATE EXTENSION pg_stat_statements;
+  #
+  # Query stats:
+  # SELECT query, calls, total_time, mean_time
+  # FROM pg_stat_statements
+  # ORDER BY total_time DESC
+  # LIMIT 10;
+  #
+  # Slow query log:
+  # ═══════════════
+  # Log only slow queries (better than all):
+  # log_min_duration_statement = 1000  # Log > 1s
+  #
+  # postgresql.conf:
+  # log_min_duration_statement = 1000
+  # log_statement = 'none'
+  #
+  # Logs:
+  # LOG: duration: 1234.567 ms  statement: SELECT * FROM users WHERE ...
+  #
+  # Benefits:
+  # ✅ Find slow queries (performance issues)
+  # ✅ No overhead для fast queries
+  # ✅ Smaller logs (only problems)
+  #
+  # When to enable logging:
+  # ═════════════════════
+  # Development:
+  # log_statement = 'all'
+  # → See all queries (debug)
+  #
+  # Staging:
+  # log_statement = 'mod'
+  # → Audit data changes
+  #
+  # Production:
+  # log_statement = 'none'
+  # log_min_duration_statement = 1000
+  # → Performance monitoring only
+
   log_duration: "off"
+  # ═══════════════════════════════════════════════════════
+  # LOG DURATION
+  # ═══════════════════════════════════════════════════════
+  #
+  # Log duration of every statement
+  #
+  # Options:
+  # ═══════
+  # off (this):
+  # ❌ No duration logging
+  # ✅ Less log volume
+  # ✅ Better performance
+  #
+  # on:
+  # ✅ Log duration of every statement
+  # ⚠️  Very verbose
+  # ⚠️  Performance impact (log writes)
+  #
+  # Example logs (if on):
+  # LOG: duration: 0.123 ms
+  # LOG: duration: 45.678 ms
+  # LOG: duration: 1234.567 ms
+  #
+  # Why "off":
+  # ═════════
+  # - Not needed (use pg_stat_statements)
+  # - Too verbose (one line per query)
+  # - Performance impact (log I/O)
+  #
+  # Better alternatives:
+  # ══════════════════
+  # pg_stat_statements:
+  # - Aggregated durations (avg, max, min)
+  # - No per-query overhead
+  # - Better insights
+  #
+  # Slow query log:
+  # - Only slow queries (> threshold)
+  # - Less volume
+  # - Focus on problems
+  #
+  # Application metrics:
+  # - HikariCP metrics (connection pool)
+  # - Spring Boot Actuator (request timing)
+  # - APM tools (Datadog, New Relic)
 
-  # Autovacuum (важливо для PostgreSQL health)
+  # ════════════════════════════════════════════════════════
+  # AUTOVACUUM CONFIGURATION
+  # ════════════════════════════════════════════════════════
+  #
+  # Automatic cleanup of dead rows
+  #
+  # PostgreSQL MVCC (Multi-Version Concurrency Control):
+  # - UPDATE creates new row version (old version kept)
+  # - DELETE marks row deleted (not removed)
+  # - Old versions = "dead rows" (need cleanup)
+  #
+  # VACUUM:
+  # - Removes dead rows
+  # - Reclaims disk space
+  # - Updates statistics (query planner)
+  # - Prevents transaction ID wraparound
+  #
+  # Autovacuum:
+  # - Automatic VACUUM (background process)
+  # - Runs when needed (threshold reached)
+  # - Critical для PostgreSQL health
+
   autovacuum: "on"
+  # ═══════════════════════════════════════════════════════
+  # AUTOVACUUM ENABLE
+  # ═══════════════════════════════════════════════════════
+  #
+  # Enable automatic vacuuming
+  #
+  # on (this):
+  # ✅ Automatic cleanup (recommended)
+  # ✅ Maintains performance
+  # ✅ Prevents bloat
+  # ✅ ALWAYS use в production
+  #
+  # off:
+  # ❌ Manual VACUUM needed
+  # ❌ Database bloat (disk waste)
+  # ❌ Performance degradation
+  # ❌ Transaction ID wraparound (catastrophic!)
+  #
+  # Why ALWAYS on:
+  # ═════════════
+  # Database health:
+  # - Reclaims space від deleted rows
+  # - Updates query statistics
+  # - Prevents transaction ID wraparound
+  #
+  # Transaction ID wraparound:
+  # PostgreSQL uses 32-bit transaction IDs
+  # After 2 billion transactions:
+  # - IDs wrap around (start від 0)
+  # - Old data becomes "future" data
+  # - Database corruption (data loss!)
+  #
+  # Autovacuum prevents:
+  # - Freezes old transaction IDs
+  # - Prevents wraparound
+  # - Database stays healthy
+  #
+  # ⚠️  NEVER turn off autovacuum!
+  # Only exception: Manual vacuum schedule (experts only)
+  #
+  # Monitoring:
+  # ══════════
+  # Check autovacuum activity:
+  # SELECT * FROM pg_stat_user_tables
+  # WHERE schemaname = 'public'
+  # ORDER BY n_dead_tup DESC;
+  #
+  # Columns:
+  # - n_dead_tup: Dead rows (need vacuum)
+  # - last_autovacuum: Last auto cleanup
+  # - autovacuum_count: How many times
+  #
+  # If n_dead_tup high:
+  # - Autovacuum может be slow
+  # - Increase autovacuum_max_workers
+  # - Decrease autovacuum thresholds
+  #
+  # Manual vacuum:
+  # VACUUM VERBOSE users;
+  # → Shows detailed vacuum info
+
   autovacuum_max_workers: "3"
+  # ═══════════════════════════════════════════════════════
+  # AUTOVACUUM MAX WORKERS
+  # ═══════════════════════════════════════════════════════
+  #
+  # Number of concurrent autovacuum processes
+  #
+  # Default: 3 (PostgreSQL default)
+  #
+  # How it works:
+  # ═══════════
+  # Autovacuum launcher:
+  # - Monitors table statistics
+  # - Triggers autovacuum when needed
+  # - Spawns worker processes (up to max_workers)
+  #
+  # Workers:
+  # - One worker per table
+  # - Parallel vacuuming (multiple tables)
+  # - Each uses maintenance_work_mem
+  #
+  # Example:
+  # Tables needing vacuum: users, sessions, logs
+  # autovacuum_max_workers: 3
+  # → 3 workers start simultaneously
+  # → All tables vacuumed в parallel
+  #
+  # Sizing:
+  # ══════
+  # Small database (few tables):
+  # - 1-3 workers sufficient
+  #
+  # Medium database (many tables):
+  # - 3-5 workers
+  #
+  # Large database (hundreds of tables):
+  # - 5-10 workers
+  #
+  # Memory usage:
+  # Workers * maintenance_work_mem
+  # 3 * 64MB = 192MB total
+  #
+  # CPU usage:
+  # Each worker = one CPU core (during vacuum)
+  # 3 workers = up to 3 cores
+  #
+  # Our config:
+  # 3 workers = good balance
+  # - Few tables (users, roles, user_roles)
+  # - 3 workers can handle all
+  # - Reasonable memory (192MB)
+  #
+  # When to increase:
+  # ════════════════
+  # Check vacuum lag:
+  # SELECT schemaname, tablename, n_dead_tup,
+  #        last_autovacuum, last_autoanalyze
+  # FROM pg_stat_user_tables
+  # WHERE n_dead_tup > 1000
+  # ORDER BY n_dead_tup DESC;
+  #
+  # If many tables з high n_dead_tup:
+  # → Increase max_workers (vacuum faster)
+  #
+  # If autovacuum slow:
+  # → Check maintenance_work_mem (increase?)
+  # → Check I/O throttling (autovacuum_vacuum_cost_limit)
+
+# ════════════════════════════════════════════════════════════════
+# CONFIGMAP USAGE
+# ════════════════════════════════════════════════════════════════
+#
+# Used by:
+# ═══════
+# 1. PostgreSQL Deployment (env vars)
+# 2. Application Deployment (connection params)
+# 3. Documentation (reference)
+#
+# Mount as environment variables:
+# env:
+#   - name: POSTGRES_DB
+#     valueFrom:
+#       configMapKeyRef:
+#         name: auth-postgres-config
+#         key: POSTGRES_DB
+#
+# Mount as files:
+# volumeMounts:
+#   - name: postgres-config
+#     mountPath: /etc/postgresql/
+# volumes:
+#   - name: postgres-config
+#     configMap:
+#       name: auth-postgres-config
+#
+# Files created:
+# /etc/postgresql/POSTGRES_DB
+# /etc/postgresql/POSTGRES_USER
+# /etc/postgresql/max_connections
+# ...
+#
+# Custom postgresql.conf:
+# volumes:
+#   - name: postgres-config
+#     configMap:
+#       name: auth-postgres-config
+#       items:
+#       - key: postgresql.conf
+#         path: postgresql.conf
+#
+# PostgreSQL uses:
+# postgres -c config_file=/etc/postgresql/postgresql.conf
+#
+# Updates:
+# ═══════
+# kubectl edit configmap auth-postgres-config
+# → Edit values
+# → Restart pods (some settings)
+# → Reload config (SIGHUP):
+#   SELECT pg_reload_conf();

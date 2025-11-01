@@ -1,54 +1,2093 @@
-# Redis ConfigMap
-# Configuration для Auth Service Redis
+# ════════════════════════════════════════════════════════════════
+# REDIS CONFIGMAP
+# ════════════════════════════════════════════════════════════════
+#
+# Redis configuration file
+#
+# ConfigMap contains: redis.conf
+# Mounted to: /usr/local/etc/redis/redis.conf
+#
+# Redis config precedence:
+# 1. Command line args (--requirepass, highest)
+# 2. Config file (this)
+# 3. Defaults (lowest)
 
 apiVersion: v1
 kind: ConfigMap
+
 metadata:
   name: auth-redis-config
   namespace: tiles-infra
   labels:
     app: auth-redis
     component: cache
+
 data:
-  # Redis configuration file
   redis.conf: |
-    # Network
+    # ════════════════════════════════════════════════════════
+    # REDIS CONFIGURATION FILE
+    # ════════════════════════════════════════════════════════
+    #
+    # Redis 7.x configuration
+    # Optimized для Auth Service (token storage)
+    #
+    # Configuration sections:
+    # 1. Network (bind, port, timeouts)
+    # 2. General (daemonize, logging)
+    # 3. Snapshotting (RDB persistence)
+    # 4. Memory management (maxmemory, eviction)
+    # 5. Append Only File (AOF persistence)
+    # 6. Slow log (performance monitoring)
+    # 7. Security (password, ACL)
+
+    # ════════════════════════════════════════════════════════
+    # NETWORK
+    # ════════════════════════════════════════════════════════
+
     bind 0.0.0.0
+    # ═══════════════════════════════════════════════════
+    # BIND ADDRESS
+    # ═══════════════════════════════════════════════════
+    #
+    # Which network interfaces to listen on
+    #
+    # Options:
+    # ═══════
+    # 127.0.0.1 (localhost only):
+    # - Local connections only
+    # - Cannot connect від другого пода
+    # - Cannot connect від сервісу
+    # ❌ Does NOT work в Kubernetes
+    #
+    # 0.0.0.0 (all interfaces):
+    # - Listen on all network interfaces
+    # - Accepts connections від будь-якого IP
+    # - Kubernetes pods can connect
+    # ✅ Required для Kubernetes
+    #
+    # Specific IP:
+    # bind 192.168.1.100
+    # - Listen only on specific IP
+    # - Rare use case
+    #
+    # WHY 0.0.0.0 в Kubernetes:
+    # ═════════════════════════
+    # Pod networking:
+    # - Each pod has own IP (dynamic)
+    # - Service routes to pod IP
+    # - Must accept connections від any IP
+    #
+    # Connection flow:
+    # Auth Service Pod (10.1.1.5)
+    #   ↓
+    # Service: auth-redis (10.96.1.10)
+    #   ↓
+    # Redis Pod (10.1.1.8:6379)
+    #
+    # Redis sees connection від 10.1.1.5
+    # Must accept (0.0.0.0 allows all)
+    #
+    # Security:
+    # ════════
+    # 0.0.0.0 sounds dangerous (all IPs?)
+    # But safe в Kubernetes:
+    # ✅ ClusterIP (internal only)
+    # ✅ Network policies (optional firewall)
+    # ✅ Password required (requirepass)
+    # ✅ No external exposure
+    #
+    # Outside cluster cannot reach:
+    # - No LoadBalancer (no external IP)
+    # - No NodePort (no node exposure)
+    # - ClusterIP (cluster internal)
+    #
+    # Advanced (multiple binds):
+    # bind 0.0.0.0 ::0
+    # → IPv4 (0.0.0.0) and IPv6 (::0)
+
     protected-mode yes
+    # ═══════════════════════════════════════════════════
+    # PROTECTED MODE
+    # ═══════════════════════════════════════════════════
+    #
+    # Security feature (Redis 3.2+)
+    #
+    # yes (enabled):
+    # - Requires password OR bind localhost
+    # - Prevents unauthorized access
+    # - Recommended
+    #
+    # no (disabled):
+    # - No authentication required
+    # - Accepts any connection
+    # - Dangerous (open to all)
+    #
+    # How it works:
+    # ═══════════
+    # IF bind = 0.0.0.0 AND no password:
+    # → Protected mode blocks connections
+    # → Error: "DENIED Redis is running in protected mode"
+    #
+    # IF bind = 0.0.0.0 AND password set:
+    # → Protected mode allows (password required)
+    # → Connections authenticated
+    #
+    # IF bind = 127.0.0.1:
+    # → Protected mode allows (localhost safe)
+    # → Local connections only
+    #
+    # Our config:
+    # - bind 0.0.0.0 (accept all IPs)
+    # - protected-mode yes (require password)
+    # - --requirepass $(REDIS_PASSWORD) (password set)
+    # → Secure configuration ✅
+    #
+    # Why enabled:
+    # ✅ Defense в depth (extra layer)
+    # ✅ Catches misconfigurations (forgot password)
+    # ✅ Best practice (always enable)
+
     port 6379
+    # ═══════════════════════════════════════════════════
+    # PORT
+    # ═══════════════════════════════════════════════════
+    #
+    # TCP port to listen on
+    #
+    # 6379 = Redis default
+    # Well-known port (IANA registered)
+    #
+    # Cannot change easily:
+    # - Clients expect 6379
+    # - Tools assume 6379
+    # - Documentation uses 6379
+    #
+    # Custom port (if needed):
+    # port 7000
+    # → Less common, requires client config
+    #
+    # Multiple Redis instances:
+    # - Instance 1: port 6379
+    # - Instance 2: port 6380
+    # - Instance 3: port 6381
+    #
+    # Unix socket (alternative):
+    # unixsocket /tmp/redis.sock
+    # unixsocketperm 700
+    # → Faster (no TCP overhead)
+    # → Only local connections
+    # → Not useful в Kubernetes (pods on different nodes)
+
     tcp-backlog 511
+    # ═══════════════════════════════════════════════════
+    # TCP BACKLOG
+    # ═══════════════════════════════════════════════════
+    #
+    # Pending connection queue size
+    #
+    # How TCP connections work:
+    # ═════════════════════════
+    # 1. Client → SYN (connection request)
+    # 2. Server → SYN-ACK (acknowledge)
+    # 3. Client → ACK (confirm)
+    # 4. Connection established
+    #
+    # Backlog queue:
+    # - Holds connections в state 2 (SYN-ACK sent)
+    # - Waiting для client ACK
+    # - Limited size (tcp-backlog)
+    #
+    # If queue full:
+    # - New connections refused
+    # - Client gets connection error
+    # - "Connection refused"
+    #
+    # Default: 511
+    # - Good для most cases
+    # - Handles burst traffic
+    # - Prevents queue overflow
+    #
+    # High traffic scenarios:
+    # tcp-backlog 2048
+    # → Larger queue (more pending connections)
+    # → Better handling (traffic spikes)
+    #
+    # System limit:
+    # Linux: /proc/sys/net/core/somaxconn
+    # Must be >= tcp-backlog
+    #
+    # Check:
+    # sysctl net.core.somaxconn
+    # → 128 (default, too low!)
+    #
+    # Increase:
+    # sysctl -w net.core.somaxconn=2048
+    #
+    # Kubernetes:
+    # Host system setting (node level)
+    # Cannot change від pod (security)
+    #
+    # Our config: 511 (default)
+    # - Auth service (low traffic)
+    # - Few concurrent connections
+    # - Default sufficient
+
     timeout 0
+    # ═══════════════════════════════════════════════════
+    # CLIENT TIMEOUT
+    # ═══════════════════════════════════════════════════
+    #
+    # Idle connection timeout (seconds)
+    #
+    # 0 = disabled (never timeout)
+    # - Connections kept alive forever
+    # - Client responsible для closing
+    #
+    # > 0 = timeout after N seconds
+    # - Idle connections closed automatically
+    # - Frees resources
+    #
+    # Example:
+    # timeout 300
+    # → Close connection after 5 min idle
+    #
+    # Idle connection:
+    # - Connection open
+    # - No commands sent
+    # - No data transfer
+    #
+    # Active connection:
+    # - Sending commands
+    # - Receiving responses
+    # - Never times out (reset on activity)
+    #
+    # Why disable (0):
+    # ═══════════════
+    # Connection pooling:
+    # - Apps use connection pools (HikariCP)
+    # - Keeps connections alive
+    # - Reuses connections (performance)
+    # - Pool manages lifecycle
+    #
+    # Timeout issues:
+    # - Pool connection → idle 5 min
+    # - Redis closes connection (timeout)
+    # - App tries to use → broken pipe
+    # - Must reconnect (overhead)
+    #
+    # Better approach:
+    # - timeout 0 (Redis side)
+    # - Pool idle timeout (app side)
+    # - App controls lifecycle
+    #
+    # When to enable:
+    # ══════════════
+    # Many clients:
+    # - Direct connections (no pool)
+    # - Clients forget to close
+    # - Resource leak (too many connections)
+    # - Timeout cleans up
+    #
+    # Example:
+    # timeout 300
+    # maxclients 1000
+    # → Close idle after 5 min
+    # → Prevents connection exhaustion
+    #
+    # Our config: 0 (disabled)
+    # - Connection pooling (HikariCP)
+    # - Few clients (auth-service only)
+    # - App manages connections
+
     tcp-keepalive 300
-    
-    # General
+    # ═══════════════════════════════════════════════════
+    # TCP KEEPALIVE
+    # ═══════════════════════════════════════════════════
+    #
+    # Send TCP keepalive packets (seconds)
+    #
+    # 0 = disabled
+    # > 0 = send keepalive every N seconds
+    #
+    # TCP keepalive:
+    # ═════════════
+    # Purpose: Detect dead connections
+    #
+    # Scenario:
+    # 1. Client connects to Redis
+    # 2. Network failure (cable unplugged)
+    # 3. Client dead (cannot close connection)
+    # 4. Redis doesn't know (TCP established)
+    # 5. Connection stuck (resources wasted)
+    #
+    # Keepalive solution:
+    # 1. Redis sends keepalive packet (empty)
+    # 2. If client responds → Connection alive
+    # 3. If no response → Connection dead
+    # 4. Close connection (free resources)
+    #
+    # How it works:
+    # ════════════
+    # tcp-keepalive 300 (every 5 minutes):
+    # - Send SO_KEEPALIVE packet
+    # - Wait для response
+    # - If no response (3 attempts)
+    # - Declare connection dead
+    # - Close socket
+    #
+    # Benefits:
+    # ✅ Detect network failures
+    # ✅ Close zombie connections
+    # ✅ Free resources (memory, file descriptors)
+    # ✅ Prevent connection leaks
+    #
+    # Linux keepalive settings:
+    # - tcp_keepalive_time: 7200s (2 hours, first probe)
+    # - tcp_keepalive_intvl: 75s (interval між probes)
+    # - tcp_keepalive_probes: 9 (attempts before giving up)
+    #
+    # Redis overrides first probe time (tcp-keepalive)
+    # Other settings від OS
+    #
+    # Example timeline:
+    # 0:00 - Connection established
+    # 5:00 - First keepalive (tcp-keepalive 300)
+    # 5:00 - No response
+    # 6:15 - Second keepalive (75s later)
+    # 6:15 - No response
+    # 7:30 - Third keepalive (75s later)
+    # 7:30 - No response
+    # 7:30 - Connection closed (dead)
+    #
+    # Why 300s:
+    # ════════
+    # Balance:
+    # - Too short (60s): Unnecessary traffic
+    # - Too long (3600s): Slow detection
+    # - 300s (5 min): Good balance
+    #
+    # Kubernetes notes:
+    # ════════════════
+    # Pods can restart:
+    # - Pod crashes → Connection broken
+    # - Keepalive detects (5 min)
+    # - Client reconnects
+    #
+    # Service mesh (Istio):
+    # - Own keepalive settings
+    # - May conflict з Redis
+    # - Check mesh config
+    #
+    # Our config: 300 (5 minutes)
+    # - Detect failures quickly
+    # - Not too aggressive
+    # - Standard practice
+
+    # ════════════════════════════════════════════════════
+    # GENERAL
+    # ════════════════════════════════════════════════════
+
     daemonize no
+    # ═══════════════════════════════════════════════════
+    # DAEMONIZE
+    # ═══════════════════════════════════════════════════
+    #
+    # Run Redis as background daemon
+    #
+    # yes: Background process (daemon)
+    # - Redis forks to background
+    # - Returns control to shell
+    # - PID written to pidfile
+    # - Logs to file
+    #
+    # no: Foreground process (this)
+    # - Redis runs в foreground
+    # - Blocks terminal
+    # - Logs to stdout
+    # - Process visible
+    #
+    # WHY no в Kubernetes:
+    # ══════════════════
+    # Container best practices:
+    # - One process per container
+    # - Process PID 1 (main process)
+    # - Foreground (не daemon)
+    # - Logs to stdout (kubectl logs)
+    #
+    # Daemon issues в containers:
+    # ═══════════════════════════
+    # If daemonize yes:
+    # 1. Container starts
+    # 2. Redis starts (PID 1)
+    # 3. Redis forks to background (PID 2)
+    # 4. Original process exits (PID 1 dies)
+    # 5. Container thinks app crashed
+    # 6. Container restarts (CrashLoopBackOff)
+    #
+    # Kubernetes expects:
+    # - Main process PID 1
+    # - Runs foreground
+    # - Never exits (unless crash)
+    #
+    # Logging:
+    # ═══════
+    # daemonize no:
+    # - Logs to stdout/stderr
+    # - kubectl logs auth-redis-xxx
+    # - Centralized logging (Fluentd, Filebeat)
+    # ✅ Kubernetes-native
+    #
+    # daemonize yes:
+    # - Logs to file
+    # - Must mount volume (view logs)
+    # - Parse log files
+    # ❌ Not Kubernetes-friendly
+    #
+    # Always use: daemonize no (containers)
+
     pidfile /var/run/redis_6379.pid
+    # ═══════════════════════════════════════════════════
+    # PID FILE
+    # ═══════════════════════════════════════════════════
+    #
+    # Process ID file location
+    #
+    # Contains: Redis process ID (integer)
+    # Example: 42
+    #
+    # Usage:
+    # ═════
+    # Daemon mode (daemonize yes):
+    # - Write PID to file (startup)
+    # - Other tools read PID
+    # - Send signals (kill, reload)
+    #
+    # Example:
+    # cat /var/run/redis_6379.pid
+    # → 42
+    #
+    # kill -TERM 42
+    # → Graceful shutdown
+    #
+    # Foreground mode (daemonize no):
+    # - PID file not created (unnecessary)
+    # - Process visible (ps aux)
+    # - Kubernetes manages lifecycle
+    #
+    # Our config:
+    # - daemonize no (foreground)
+    # - pidfile not used (ignored)
+    # - Kept для compatibility
+
     loglevel notice
+    # ═══════════════════════════════════════════════════
+    # LOG LEVEL
+    # ═══════════════════════════════════════════════════
+    #
+    # Logging verbosity
+    #
+    # Levels (least to most verbose):
+    # ═══════════════════════════════
+    #
+    # debug:
+    # - Very detailed (every operation)
+    # - Performance impact
+    # - Huge log volume
+    # - Development only
+    #
+    # verbose:
+    # - Detailed information
+    # - More than needed
+    # - High log volume
+    #
+    # notice (this):
+    # - Important information only
+    # - Startup, shutdown, config
+    # - Warnings, errors
+    # - Production recommended
+    #
+    # warning:
+    # - Only warnings і errors
+    # - Minimal logging
+    # - May miss important info
+    #
+    # Log examples:
+    # ════════════
+    # notice level:
+    # [1234] 01 Nov 12:00:00.000 * Server started
+    # [1234] 01 Nov 12:00:00.001 * Ready to accept connections
+    # [1234] 01 Nov 12:05:00.000 * 10 changes in 300 seconds. Saving...
+    # [1234] 01 Nov 12:05:00.100 * Background saving started by pid 1235
+    # [1234] 01 Nov 12:05:00.200 * DB saved on disk
+    #
+    # debug level (too verbose):
+    # [1234] 01 Nov 12:00:00.000 * Server started
+    # [1234] 01 Nov 12:00:00.001 * Loading RDB file
+    # [1234] 01 Nov 12:00:00.002 * Reading key: refresh_token:abc123
+    # [1234] 01 Nov 12:00:00.003 * Key loaded, size: 256 bytes
+    # [1234] 01 Nov 12:00:00.004 * Reading key: refresh_token:def456
+    # ... (thousands of lines)
+    #
+    # Why notice:
+    # ══════════
+    # ✅ Enough info (operations, errors)
+    # ✅ Not too verbose (manageable logs)
+    # ✅ Performance (low overhead)
+    # ✅ Production standard
+    #
+    # When to change:
+    # ══════════════
+    # Debugging issues:
+    # - Temporarily set: debug або verbose
+    # - Reproduce problem
+    # - Analyze detailed logs
+    # - Set back to notice
+    #
+    # Production (quiet):
+    # - Set: warning
+    # - Only critical issues
+    # - Minimal log volume
+    #
+    # Monitoring approach:
+    # ═══════════════════
+    # Logs (notice):
+    # - Startup/shutdown events
+    # - Errors і warnings
+    # - Persistence operations
+    #
+    # Metrics (separate):
+    # - Prometheus exporter
+    # - INFO commands
+    # - Performance metrics
+    # - Better than debug logs
+
     logfile ""
+    # ═══════════════════════════════════════════════════
+    # LOG FILE
+    # ═══════════════════════════════════════════════════
+    #
+    # Log file path
+    #
+    # "" (empty string):
+    # - Log to stdout (standard output)
+    # - Console output
+    # - Kubernetes-friendly
+    #
+    # "/var/log/redis/redis.log":
+    # - Log to file
+    # - Persistent logs
+    # - Must mount volume
+    #
+    # WHY empty string:
+    # ════════════════
+    # Kubernetes logging:
+    # - Containers log to stdout/stderr
+    # - kubectl logs captures output
+    # - Log aggregation (Fluentd, Loki)
+    # - Centralized logging
+    #
+    # Container logs:
+    # kubectl logs auth-redis-xxx
+    # → Shows Redis logs (stdout)
+    #
+    # Follow logs:
+    # kubectl logs -f auth-redis-xxx
+    # → Tail logs (real-time)
+    #
+    # File logging issues:
+    # ═══════════════════
+    # If logfile "/var/log/redis/redis.log":
+    # - Must mount volume (persist logs)
+    # - Cannot use kubectl logs (no stdout)
+    # - Must exec into pod (view file)
+    # - Log rotation needed (disk full)
+    #
+    # Example:
+    # kubectl exec -it auth-redis-xxx -- tail -f /var/log/redis/redis.log
+    # → Manual log viewing (inconvenient)
+    #
+    # Stdout advantages:
+    # ✅ Kubernetes-native (kubectl logs)
+    # ✅ Log aggregation (automatic)
+    # ✅ No volume needed (stateless)
+    # ✅ Standard practice (12-factor app)
+    #
+    # Production logging:
+    # ══════════════════
+    # Stdout → Log aggregator:
+    # - Fluentd (Kubernetes DaemonSet)
+    # - Filebeat (Elastic Stack)
+    # - Promtail (Grafana Loki)
+    # - Cloud logging (AWS CloudWatch, Google Cloud Logging)
+    #
+    # Log aggregation:
+    # 1. Container writes to stdout
+    # 2. Docker/containerd captures
+    # 3. Saves to: /var/log/pods/.../*.log
+    # 4. Log shipper reads files
+    # 5. Sends to centralized storage
+    # 6. Search, analyze, alert
+    #
+    # Our config: "" (stdout)
+    # - Best practice для Kubernetes
+    # - Simple і effective
+
     databases 16
-    
-    # Snapshotting (RDB persistence)
-    save 900 1      # Save if 1 key changed in 15 min
-    save 300 10     # Save if 10 keys changed in 5 min
-    save 60 10000   # Save if 10000 keys changed in 1 min
-    
+    # ═══════════════════════════════════════════════════
+    # DATABASES
+    # ═══════════════════════════════════════════════════
+    #
+    # Number of logical databases
+    #
+    # Default: 16 (databases 0-15)
+    #
+    # Database selection:
+    # ══════════════════
+    # Redis has numbered databases (not named)
+    #
+    # SELECT command:
+    # SELECT 0  # Default database
+    # SELECT 1  # Database 1
+    # SELECT 15 # Last database
+    #
+    # Use cases:
+    # ════════
+    # Separate data:
+    # - DB 0: Refresh tokens
+    # - DB 1: Sessions
+    # - DB 2: Cache
+    # - DB 3: Rate limiting
+    #
+    # Advantages:
+    # ✅ Logical separation (organization)
+    # ✅ Easy cleanup (FLUSHDB vs FLUSHALL)
+    # ✅ Different TTL strategies
+    #
+    # Disadvantages:
+    # ❌ Not true isolation (same memory)
+    # ❌ Performance (not parallel)
+    # ❌ Complexity (which DB?)
+    #
+    # Best practices:
+    # ══════════════
+    # Modern approach: Use one database (DB 0)
+    # - Key prefixing (refresh_token:*, session:*)
+    # - Namespacing (auth:tokens:*, auth:sessions:*)
+    # - Clearer (key names self-document)
+    #
+    # Example:
+    # refresh_token:abc123 → Token data
+    # session:user:12345 → Session data
+    # cache:user:profile:12345 → Cached profile
+    #
+    # Benefits:
+    # ✅ Single DB (simple)
+    # ✅ Clear prefixes (self-documenting)
+    # ✅ Easy patterns (SCAN refresh_token:*)
+    #
+    # When to use multiple DBs:
+    # ════════════════════════
+    # - Legacy compatibility (old apps)
+    # - Clear separation needed (dev vs test)
+    # - Different persistence (DB 0 RDB, DB 1 AOF)
+    #
+    # Our config: 16 (default)
+    # - Standard practice
+    # - Auth Service uses DB 0 only
+    # - Others available (future use)
+    #
+    # Cluster mode:
+    # ════════════
+    # Redis Cluster:
+    # - Only DB 0 supported
+    # - Multiple databases не підтримуються
+    # - Sharding instead (horizontal scaling)
+
+    # ════════════════════════════════════════════════════
+    # SNAPSHOTTING (RDB PERSISTENCE)
+    # ════════════════════════════════════════════════════
+    #
+    # RDB = Redis Database file
+    # Point-in-time snapshot (backup)
+
+    save 900 1
+    # ═══════════════════════════════════════════════════
+    # SAVE 900 1
+    # ═══════════════════════════════════════════════════
+    #
+    # Save if 1+ keys changed в last 900 seconds (15 min)
+    #
+    # Format: save <seconds> <changes>
+    #
+    # Conditions (OR logic):
+    # - save 900 1: 15 min AND 1+ change
+    # - save 300 10: 5 min AND 10+ changes
+    # - save 60 10000: 1 min AND 10000+ changes
+    #
+    # Any condition triggers save
+    #
+    # Why 900 seconds (15 min):
+    # ═════════════════════════
+    # Balance:
+    # - Frequent saves (data protection)
+    # - Not too frequent (performance)
+    #
+    # Example scenario:
+    # 12:00 - User logs в (1 key changed)
+    # 12:15 - Save triggered (900s passed)
+    # 12:16 - RDB file written
+    # 12:17 - Redis crashes
+    # 12:18 - Redis restarts
+    # 12:19 - Loads RDB від 12:16
+    # → User token preserved ✅
+    #
+    # Data loss window:
+    # - Maximum: 15 minutes
+    # - Tokens created after last save → Lost
+    # - Users must re-login
+    #
+    # Acceptable for:
+    # ✅ Refresh tokens (short TTL, can re-login)
+    # ✅ Cache (can rebuild)
+    # ✅ Sessions (temporary)
+    #
+    # NOT acceptable for:
+    # ❌ Financial transactions (use AOF)
+    # ❌ Critical data (use AOF + RDB)
+
+    save 300 10
+    # ═══════════════════════════════════════════════════
+    # SAVE 300 10
+    # ═══════════════════════════════════════════════════
+    #
+    # Save if 10+ keys changed в last 300 seconds (5 min)
+    #
+    # Why 10 changes:
+    # ══════════════
+    # Moderate activity threshold
+    #
+    # Example:
+    # 12:00 - 10 users log в (10 keys)
+    # 12:05 - Save triggered (300s passed, 10+ changes)
+    # 12:06 - RDB written
+    #
+    # Data loss window: 5 minutes (better)
+    #
+    # Scenarios:
+    # ════════
+    # Low traffic (< 10 users/5min):
+    # - save 900 1 triggers (15 min wait)
+    # - Data loss: up to 15 min
+    #
+    # Moderate traffic (10+ users/5min):
+    # - save 300 10 triggers (5 min wait)
+    # - Data loss: up to 5 min
+    # - Better protection
+    #
+    # High traffic (10000+ ops/min):
+    # - save 60 10000 triggers (1 min wait)
+    # - Data loss: up to 1 min
+    # - Best protection
+
+    save 60 10000
+    # ═══════════════════════════════════════════════════
+    # SAVE 60 10000
+    # ═══════════════════════════════════════════════════
+    #
+    # Save if 10000+ keys changed в last 60 seconds (1 min)
+    #
+    # Why 10000 changes:
+    # ═════════════════
+    # Very high activity threshold
+    #
+    # Example:
+    # - 1000 requests/second
+    # - Each request: SET key
+    # - 60 seconds: 60,000 changes
+    # - Triggers save (> 10000)
+    #
+    # Unlikely для Auth Service:
+    # - Low traffic (< 100 req/s)
+    # - Few writes (login, refresh)
+    # - This rule rarely triggers
+    #
+    # Purpose:
+    # - High-traffic apps (many writes)
+    # - Frequent snapshots (data protection)
+    # - Minimal data loss (1 min max)
+    #
+    # Performance impact:
+    # ══════════════════
+    # BGSAVE (background save):
+    # - Redis forks process
+    # - Child writes RDB file
+    # - Parent continues serving
+    # - Copy-on-write (COW)
+    #
+    # Memory:
+    # - Fork: Brief spike (2x memory)
+    # - COW: Only changed pages duplicated
+    # - Typical: +10-20% memory
+    #
+    # CPU:
+    # - Fork: Brief spike
+    # - Write: Background (low priority)
+    # - Minimal impact (< 5%)
+    #
+    # I/O:
+    # - Disk writes (RDB file)
+    # - Can slow queries (disk saturation)
+    # - SSD recommended (fast writes)
+    #
+    # Disable snapshotting:
+    # ════════════════════
+    # save ""
+    # → No automatic saves
+    # → Manual BGSAVE only
+    # → Ephemeral data (cache)
+    #
+    # When to disable:
+    # - Pure cache (rebuild від source)
+    # - AOF enabled (persistence via AOF)
+    # - External backups (scheduled)
+
     stop-writes-on-bgsave-error yes
+    # ═══════════════════════════════════════════════════
+    # STOP WRITES ON BGSAVE ERROR
+    # ═══════════════════════════════════════════════════
+    #
+    # Stop accepting writes if RDB save fails
+    #
+    # yes (enabled):
+    # - BGSAVE fails (disk full, permissions)
+    # - Redis refuses writes (SET, DEL, etc.)
+    # - Reads still work (GET)
+    # - Error: "MISCONF Redis is configured to save RDB snapshots"
+    #
+    # no (disabled):
+    # - BGSAVE fails
+    # - Redis continues accepting writes
+    # - Data not persisted (lost on restart)
+    # - Silent data loss risk
+    #
+    # Why enable:
+    # ══════════
+    # Data integrity:
+    # - Persistence failure = serious problem
+    # - Better fail-fast (visible error)
+    # - Forces fix (disk space, permissions)
+    # - Prevents silent data loss
+    #
+    # Example scenario:
+    # ════════════════
+    # Disk full:
+    # 1. Redis tries BGSAVE
+    # 2. Write fails (no space)
+    # 3. Redis stops accepting writes
+    # 4. Application gets errors
+    # 5. Alerts triggered (monitoring)
+    # 6. Admin fixes disk space
+    # 7. Redis resumes (automatic)
+    #
+    # vs disabled:
+    # 1. Redis tries BGSAVE
+    # 2. Write fails (no space)
+    # 3. Redis continues (no error)
+    # 4. Data accepted але not saved
+    # 5. Redis crashes
+    # 6. Data lost (no RDB) ❌
+    #
+    # Disadvantages:
+    # ═════════════
+    # Availability:
+    # - Persistence failure → Service unavailable
+    # - Writes blocked (reads OK)
+    # - Must fix immediately
+    #
+    # False positives:
+    # - Temporary disk issue
+    # - Permissions problem
+    # - Blocks writes (may be unnecessary)
+    #
+    # When to disable:
+    # ═══════════════
+    # - Availability > durability
+    # - Cache usage (data expendable)
+    # - External monitoring (alerts)
+    #
+    # Our config: yes (enabled)
+    # - Data protection (tokens important)
+    # - Fail-fast (detect problems)
+    # - Best practice (production)
+
     rdbcompression yes
+    # ═══════════════════════════════════════════════════
+    # RDB COMPRESSION
+    # ═══════════════════════════════════════════════════
+    #
+    # Compress RDB file (LZF algorithm)
+    #
+    # yes (enabled):
+    # - RDB compressed (smaller file)
+    # - Faster network transfer
+    # - Less disk space
+    # - CPU overhead (compression)
+    #
+    # no (disabled):
+    # - RDB uncompressed (larger file)
+    # - Faster save/load (no CPU)
+    # - More disk space
+    # - Faster backups (no compression)
+    #
+    # Compression ratio:
+    # ═════════════════
+    # Typical: 5:1 to 10:1
+    # - 100MB data → 10-20MB RDB
+    # - Depends на data (text compresses well)
+    #
+    # Example:
+    # Uncompressed: 50MB
+    # Compressed: 8MB (6:1 ratio)
+    # Savings: 42MB (84%)
+    #
+    # Performance:
+    # ═══════════
+    # Save time:
+    # - Compression: +10-20% CPU
+    # - Write: -50% time (smaller file)
+    # - Net: Faster (less I/O)
+    #
+    # Load time:
+    # - Decompression: +10-20% CPU
+    # - Read: -50% time (smaller file)
+    # - Net: Faster (less I/O)
+    #
+    # Why enable:
+    # ══════════
+    # ✅ Smaller files (less disk)
+    # ✅ Faster I/O (less data)
+    # ✅ Faster backups (smaller transfer)
+    # ✅ Lower costs (storage)
+    #
+    # CPU vs I/O:
+    # - CPU cheap (compression fast)
+    # - I/O expensive (disk/network slow)
+    # - Compression wins (usually)
+    #
+    # When to disable:
+    # ═══════════════
+    # - CPU limited (no spare cycles)
+    # - Very fast I/O (NVMe, no bottleneck)
+    # - Already compressed data (images, video)
+    #
+    # Our config: yes (enabled)
+    # - Standard practice
+    # - Better performance (I/O bound)
+    # - Recommended
+
     rdbchecksum yes
+    # ═══════════════════════════════════════════════════
+    # RDB CHECKSUM
+    # ═══════════════════════════════════════════════════
+    #
+    # Add CRC64 checksum to RDB file
+    #
+    # yes (enabled):
+    # - Compute checksum (save)
+    # - Verify checksum (load)
+    # - Detect corruption
+    # - +10% save time (checksum calculation)
+    #
+    # no (disabled):
+    # - No checksum
+    # - Faster save/load
+    # - No corruption detection
+    # - Risk: Load corrupt data
+    #
+    # Checksum process:
+    # ════════════════
+    # Save:
+    # 1. Serialize data
+    # 2. Compute CRC64 (checksum)
+    # 3. Append to file (footer)
+    # 4. Write to disk
+    #
+    # Load:
+    # 1. Read file від disk
+    # 2. Extract checksum (footer)
+    # 3. Compute checksum (data)
+    # 4. Compare checksums
+    # 5. If match → Load data
+    # 6. If mismatch → Reject (corrupt)
+    #
+    # Corruption scenarios:
+    # ════════════════════
+    # Disk errors:
+    # - Bad sectors (hardware)
+    # - File system corruption
+    # - Bitflip (cosmic rays, seriously!)
+    #
+    # Transfer errors:
+    # - Network corruption (backup copy)
+    # - Incomplete write (crash during save)
+    #
+    # With checksum:
+    # - Detects corruption (refuses load)
+    # - Error message (clear indication)
+    # - Can restore від backup
+    #
+    # Without checksum:
+    # - Loads corrupt data (silent failure)
+    # - Wrong values (data integrity issues)
+    # - Hard to debug (corrupted state)
+    #
+    # Performance impact:
+    # ══════════════════
+    # +10% save time:
+    # - Checksum calculation (CPU)
+    # - Minimal impact (modern CPUs fast)
+    #
+    # +5% load time:
+    # - Checksum verification
+    # - Negligible (safety worth it)
+    #
+    # Why enable:
+    # ══════════
+    # ✅ Data integrity (detect corruption)
+    # ✅ Fail-fast (reject bad data)
+    # ✅ Confidence (know data valid)
+    # ✅ Best practice (always enable)
+    #
+    # When to disable:
+    # ═══════════════
+    # - Performance critical (microseconds matter)
+    # - External validation (backup system checks)
+    # - Never (seriously, always enable)
+    #
+    # Our config: yes (enabled)
+    # - Data integrity crucial (tokens)
+    # - Minimal overhead (worth it)
+    # - Standard practice
+
     dbfilename dump.rdb
+    # ═══════════════════════════════════════════════════
+    # DB FILENAME
+    # ═══════════════════════════════════════════════════
+    #
+    # RDB file name
+    #
+    # Default: dump.rdb
+    # Full path: /data/dump.rdb (dir + dbfilename)
+    #
+    # Custom names:
+    # - dbfilename redis-6379.rdb (port-specific)
+    # - dbfilename backup-20241101.rdb (dated)
+    # - dbfilename auth-service.rdb (service-specific)
+    #
+    # Why default:
+    # ═══════════
+    # ✅ Standard convention (well-known)
+    # ✅ Tools expect it (redis-check-rdb)
+    # ✅ Documentation uses it
+    #
+    # Multiple Redis instances:
+    # ════════════════════════
+    # Same server, different ports:
+    # - Redis 1 (6379): /data1/dump.rdb
+    # - Redis 2 (6380): /data2/dump.rdb
+    # - Different directories (no conflict)
+    #
+    # або different names:
+    # - Redis 1: dump-6379.rdb
+    # - Redis 2: dump-6380.rdb
+    # - Same directory (name distinguishes)
+    #
+    # Kubernetes:
+    # ==========
+    # One Redis per pod (typical):
+    # - Single instance (no conflicts)
+    # - Default name sufficient
+    #
+    # Tools:
+    # =====
+    # redis-check-rdb:
+    # redis-check-rdb /data/dump.rdb
+    # → Validates RDB file
+    #
+    # Manual backup:
+    # kubectl exec auth-redis-xxx -- redis-cli BGSAVE
+    # kubectl cp auth-redis-xxx:/data/dump.rdb ./backup-$(date +%Y%m%d).rdb
+    #
+    # Our config: dump.rdb (default)
+    # - Standard practice
+    # - Simple і clear
+
     dir /data
-    
-    # Memory management
-    maxmemory 256mb
-    maxmemory-policy allkeys-lru  # Evict least recently used
-    
-    # Append Only File (disabled для performance)
-    appendonly no
-    
-    # Slow log
-    slowlog-log-slower-than 10000  # 10ms
-    slowlog-max-len 128
-    
-    # Security
-    # Password встановлюється через command line
-    # requirepass не вказуємо тут (plaintext)
+    # ═══════════════════════════════════════════════════
+    # DIRECTORY
+    # ═══════════════════════════════════════════════════
+    #
+    # Working directory для data files
+    #
+    # Files stored here:
+    # - dump.rdb (RDB file)
+    # - appendonly.aof (AOF file, if enabled)
+    # - temp files (during save)
+    #
+    # Full path:
+    # /data/dump.rdb
+    # └─ dir ┴ dbfilename
+    #
+    # Volume mount:
+    # volumeMounts:
+    #   - name: redis-data
+    #     mountPath: /data
+    #
+    # volumes:
+    #   - name: redis-data
+    #     emptyDir: {}  # або PVC
+    #
+    # Permissions:
+    # ═══════════
+    # Redis user must have:
+    # - Read access (load RDB)
+    # - Write access (save RDB)
+    # - Execute access (create files)
+    #
+    # Check:
+    # kubectl exec auth-redis-xxx -- ls -ld /data
+    # → drwxr-xr-x 2 redis redis 4096 Nov 1 12:00 /data
+    #
+    # If permissions wrong:
+    # - Save fails (cannot write)
+    # - stop-writes-on-bgsave-error triggers
+    # - Writes blocked
+    #
+    # Fix:
+    # kubectl exec auth-redis-xxx -- chown -R redis:redis /data
+    # kubectl exec auth-redis-xxx -- chmod 755 /data
+    #
+    # Disk space:
+    # ══════════
+    # RDB size estimation:
+    # - Data size: 10MB
+    # - Compressed (6:1): ~2MB
+    # - Temp files (during save): +2MB
+    # - Total needed: ~4MB
+    #
+    # Monitor:
+    # kubectl exec auth-redis-xxx -- df -h /data
+    #
+    # If disk full:
+    # - Save fails (no space)
+    # - Redis stops writes (protected mode)
+    # - Must free space або expand volume
+    #
+    # emptyDir vs PVC:
+    # ═══════════════
+    # emptyDir (current):
+    # - /data від node disk
+    # - Limited by node capacity
+    # - Lost на pod restart
+    #
+    # PVC (production):
+    # - /data від persistent volume
+    # - Dedicated storage
+    # - Survives pod restart
+    #
+    # Our config: /data
+    # - Standard location
+    # - Mounted від emptyDir (dev)
+    # - Use PVC (production)
+    # ════════════════════════════════════════════════════
+        # MEMORY MANAGEMENT
+        # ════════════════════════════════════════════════════
+        #
+        # Critical для Redis (in-memory database)
+        # All data stored в RAM
+
+        maxmemory 256mb
+        # ═══════════════════════════════════════════════════
+        # MAX MEMORY
+        # ═══════════════════════════════════════════════════
+        #
+        # Maximum memory Redis can use
+        #
+        # 256mb = 256,000,000 bytes (~244 MiB)
+        #
+        # MUST MATCH Kubernetes memory limit:
+        # resources.limits.memory: 256Mi (268,435,456 bytes)
+        #
+        # Why slightly less:
+        # ═════════════════
+        # Redis overhead:
+        # - Command processing (buffers)
+        # - Client connections (memory per client)
+        # - Replication (if enabled)
+        # - Fragmentation overhead
+        #
+        # Safe margin:
+        # maxmemory = K8s limit - 10-20MB
+        # → Prevents OOMKilled
+        #
+        # Example calculation:
+        # ═══════════════════
+        # K8s limit: 256Mi = 268MB
+        # maxmemory: 256mb = 256MB
+        # Buffer: 12MB (4.5%)
+        # ✅ Safe configuration
+        #
+        # What happens at limit:
+        # ═════════════════════
+        # Memory reaches maxmemory:
+        # 1. Eviction policy triggers (allkeys-lru)
+        # 2. Redis evicts keys (frees space)
+        # 3. New data can be written
+        # 4. Service continues (no crash)
+        #
+        # Memory exceeds K8s limit:
+        # 1. No eviction (maxmemory not reached)
+        # 2. Memory grows beyond 256Mi
+        # 3. OOMKilled by Kubernetes
+        # 4. Pod restarts (data lost if emptyDir)
+        # ❌ Bad configuration
+        #
+        # Memory tracking:
+        # ═══════════════
+        # Redis tracks:
+        # - used_memory: Actual data + overhead
+        # - used_memory_rss: OS perspective (with fragmentation)
+        # - used_memory_peak: Historical maximum
+        #
+        # Check memory:
+        # redis-cli INFO memory
+        #
+        # Output:
+        # used_memory:10485760          # 10MB (actual)
+        # used_memory_human:10.00M
+        # used_memory_rss:15728640      # 15MB (RSS)
+        # used_memory_peak:20971520     # 20MB (peak)
+        # maxmemory:268435456           # 256MB (limit)
+        # mem_fragmentation_ratio:1.50  # 50% fragmentation
+        #
+        # Fragmentation:
+        # ═════════════
+        # Memory fragmentation = wasted space
+        #
+        # Causes:
+        # - Delete keys (leaves holes)
+        # - Update keys (size changes)
+        # - Memory allocator behavior
+        #
+        # Fragmentation ratio:
+        # - 1.0: No fragmentation (perfect)
+        # - 1.5: 50% overhead (acceptable)
+        # - 2.0: 100% overhead (bad, restart Redis)
+        # - > 2.0: Critical (restart immediately)
+        #
+        # Fix fragmentation:
+        # redis-cli CONFIG SET activedefrag yes
+        # → Redis defragments automatically
+        #
+        # Manual (drastic):
+        # - BGSAVE (save data)
+        # - Restart Redis (fresh memory)
+        # - Loads RDB (compact memory)
+        #
+        # Memory eviction:
+        # ═══════════════
+        # When maxmemory reached:
+        # 1. Try to write new key
+        # 2. Memory full (at limit)
+        # 3. Eviction policy executes
+        # 4. Evict key(s) to free space
+        # 5. Write new key (success)
+        #
+        # No eviction policy:
+        # - maxmemory-policy noeviction
+        # - Write fails (OOM error)
+        # - Error: "OOM command not allowed"
+        #
+        # With eviction:
+        # - maxmemory-policy allkeys-lru (this)
+        # - Evicts least recently used
+        # - Write succeeds (automatic)
+        #
+        # Token storage implications:
+        # ══════════════════════════
+        # Scenario: maxmemory reached
+        # 1. 10,000 tokens stored (256MB full)
+        # 2. New user logs in (needs token)
+        # 3. Redis evicts old token (LRU)
+        # 4. Stores new token (success)
+        # 5. Old user's token gone (must re-login)
+        #
+        # Acceptable:
+        # ✅ Old tokens (inactive users)
+        # ✅ Can re-login (minor inconvenience)
+        # ✅ Service continues (no crash)
+        #
+        # Better approach:
+        # - Increase maxmemory (more users)
+        # - Shorter TTL (automatic cleanup)
+        # - Monitor usage (alert before full)
+        #
+        # Monitoring:
+        # ══════════
+        # Prometheus metrics:
+        # redis_memory_used_bytes
+        # redis_memory_max_bytes
+        #
+        # Alert:
+        # IF used > max * 0.8 THEN
+        #   "WARNING: Redis 80% memory used"
+        # END IF
+        #
+        # kubectl top:
+        # kubectl top pod auth-redis-xxx
+        # → Shows actual memory usage
+        #
+        # Why 256mb:
+        # ═════════
+        # Token storage capacity:
+        # - 300 bytes per token (data + overhead)
+        # - 256MB / 300 bytes = ~850,000 tokens
+        # - Auth service: < 10,000 users expected
+        # - 85x capacity (plenty room)
+        #
+        # Production sizing:
+        # - Monitor actual usage
+        # - Adjust based on data
+        # - Add 50% buffer (growth)
+
+        maxmemory-policy allkeys-lru
+        # ═══════════════════════════════════════════════════
+        # MAXMEMORY POLICY
+        # ═══════════════════════════════════════════════════
+        #
+        # How to evict keys when maxmemory reached
+        #
+        # EVICTION POLICIES:
+        # ═════════════════
+        #
+        # 1. noeviction:
+        # ═════════════
+        # - Don't evict anything
+        # - Refuse writes (return error)
+        # - Reads still work
+        # - Error: "OOM command not allowed"
+        #
+        # Use case:
+        # - Critical data (cannot lose)
+        # - Application handles full memory
+        # - Manual intervention needed
+        #
+        # 2. allkeys-lru (THIS ONE):
+        # ══════════════════════════
+        # - Evict ANY key (no restrictions)
+        # - Least Recently Used (LRU) algorithm
+        # - Approximation (not perfect LRU)
+        # - Most common policy
+        #
+        # LRU algorithm:
+        # - Track last access time
+        # - Evict oldest accessed key
+        # - Keep frequently used keys
+        #
+        # Example:
+        # Keys: token1(1h ago), token2(5min ago), token3(10min ago)
+        # Memory full → Evict token1 (oldest access)
+        #
+        # Approximation (Redis):
+        # - Not true LRU (performance)
+        # - Sample random keys (5 default)
+        # - Evict oldest від sample
+        # - Good enough (99% accurate)
+        #
+        # 3. allkeys-lfu:
+        # ══════════════
+        # - Evict ANY key
+        # - Least Frequently Used (LFU)
+        # - Track access count (not time)
+        # - Better для some patterns
+        #
+        # LFU vs LRU:
+        # - LRU: Recent = important
+        # - LFU: Frequent = important
+        #
+        # Example:
+        # token1: accessed 100 times (1h ago)
+        # token2: accessed 2 times (1min ago)
+        # LRU evicts: token1 (older)
+        # LFU evicts: token2 (less frequent)
+        #
+        # When LFU better:
+        # - Popular items (accessed many times)
+        # - Long-term patterns (not just recent)
+        #
+        # 4. volatile-lru:
+        # ═══════════════
+        # - Evict keys WITH TTL only
+        # - LRU algorithm
+        # - Keys without TTL never evicted
+        #
+        # Use case:
+        # - Mixed data (cache + persistent)
+        # - Cache: Set TTL (can evict)
+        # - Persistent: No TTL (keep always)
+        #
+        # Example:
+        # cache:user:123 (TTL 1h) → Can evict
+        # config:settings (no TTL) → Keep forever
+        #
+        # 5. volatile-lfu:
+        # ═══════════════
+        # - Evict keys WITH TTL only
+        # - LFU algorithm
+        # - Same як volatile-lru але LFU
+        #
+        # 6. volatile-ttl:
+        # ═══════════════
+        # - Evict keys WITH TTL only
+        # - Shortest TTL first (soonest to expire)
+        # - Logical: Will expire anyway
+        #
+        # Example:
+        # token1: TTL 5 min → Evict first
+        # token2: TTL 30 min → Evict later
+        #
+        # Use case:
+        # - TTL = importance (shorter = less important)
+        # - Natural cleanup order
+        #
+        # 7. volatile-random:
+        # ══════════════════
+        # - Evict keys WITH TTL only
+        # - Random selection (no algorithm)
+        # - Fastest (no tracking needed)
+        #
+        # 8. allkeys-random:
+        # ═════════════════
+        # - Evict ANY key
+        # - Random selection
+        # - Fastest eviction
+        # - No predictability
+        #
+        # WHY allkeys-lru:
+        # ═══════════════
+        #
+        # Auth Service use case:
+        # ✅ All keys can be evicted (tokens expendable)
+        # ✅ Old tokens less important (inactive users)
+        # ✅ Recent tokens more important (active sessions)
+        # ✅ Standard practice (most common)
+        #
+        # Token lifecycle:
+        # - User logs в → Create token (LRU: recent)
+        # - User active → Access token (LRU: recent)
+        # - User inactive → Token old (LRU: evictable)
+        # - Memory full → Evict old token (LRU wins)
+        # - User returns → Re-login (acceptable)
+        #
+        # Alternatives considered:
+        # ═══════════════════════
+        #
+        # volatile-ttl:
+        # - Tokens have TTL (expire anyway)
+        # - Could work BUT:
+        # - All TTLs similar (7 days)
+        # - Not much differentiation
+        # - LRU better (access patterns)
+        #
+        # allkeys-lfu:
+        # - Could work (frequent users kept)
+        # - BUT: LRU simpler
+        # - Access time = good enough
+        #
+        # noeviction:
+        # - Would fail writes (bad UX)
+        # - Users cannot login (memory full)
+        # - Must handle OOM (complex)
+        #
+        # Monitoring evictions:
+        # ════════════════════
+        # redis-cli INFO stats
+        #
+        # Output:
+        # evicted_keys:42
+        # → 42 keys evicted (since start)
+        #
+        # High evictions:
+        # - Memory too small (increase maxmemory)
+        # - Too many keys (reduce TTL)
+        # - Hot keys (optimize access)
+        #
+        # Alert threshold:
+        # IF evictions > 100/hour THEN
+        #   "WARNING: High eviction rate"
+        #   "Consider increasing memory"
+        # END IF
+        #
+        # Testing eviction:
+        # ════════════════
+        # Fill Redis:
+        # for i in {1..10000}; do
+        #   redis-cli SET key$i value$i
+        # done
+        #
+        # Check memory:
+        # redis-cli INFO memory | grep used_memory_human
+        #
+        # Force eviction:
+        # - Keep adding keys
+        # - Memory reaches maxmemory
+        # - Old keys evicted (LRU)
+        #
+        # Verify:
+        # redis-cli GET key1
+        # → nil (evicted)
+        #
+        # redis-cli GET key9999
+        # → value9999 (recent, kept)
+
+        # ════════════════════════════════════════════════════
+        # APPEND ONLY FILE (AOF PERSISTENCE)
+        # ════════════════════════════════════════════════════
+        #
+        # AOF = Append Only File
+        # Alternative to RDB (snapshotting)
+
+        appendonly no
+        # ═══════════════════════════════════════════════════
+        # APPENDONLY
+        # ═══════════════════════════════════════════════════
+        #
+        # Enable AOF persistence
+        #
+        # no (disabled, THIS):
+        # - RDB only (snapshots)
+        # - Faster (no write logging)
+        # - Data loss possible (since last snapshot)
+        #
+        # yes (enabled):
+        # - AOF active (log every write)
+        # - More durable (minimal data loss)
+        # - Slower (write overhead)
+        #
+        # PERSISTENCE COMPARISON:
+        # ══════════════════════
+        #
+        # RDB (Snapshotting):
+        # ══════════════════
+        # How:
+        # - Point-in-time snapshots
+        # - Save every 15 min (if changes)
+        # - Binary file (dump.rdb)
+        #
+        # Pros:
+        # ✅ Fast (background save)
+        # ✅ Compact (compressed)
+        # ✅ Fast recovery (load RDB)
+        # ✅ No performance impact (except save)
+        #
+        # Cons:
+        # ❌ Data loss (up to 15 min)
+        # ❌ Fork overhead (memory spike)
+        # ❌ Periodic (not continuous)
+        #
+        # AOF (Append Only File):
+        # ══════════════════════
+        # How:
+        # - Log every write command
+        # - Append to file (sequential)
+        # - Text file (readable)
+        #
+        # Example AOF:
+        # *2\r\n$3\r\nSET\r\n$3\r\nkey\r\n$5\r\nvalue\r\n
+        # *2\r\n$3\r\nDEL\r\n$3\r\nold\r\n
+        # *2\r\n$6\r\nEXPIRE\r\n$3\r\nkey\r\n$4\r\n3600\r\n
+        #
+        # Pros:
+        # ✅ Durable (every write logged)
+        # ✅ Minimal data loss (< 1 second)
+        # ✅ Append-only (no corruption)
+        # ✅ Readable (can edit/replay)
+        #
+        # Cons:
+        # ❌ Slower (write to disk)
+        # ❌ Larger files (all commands)
+        # ❌ Slower recovery (replay commands)
+        # ❌ More complex (rewrite needed)
+        #
+        # BOTH (RDB + AOF):
+        # ════════════════
+        # Best durability:
+        # - AOF: Every write logged (primary)
+        # - RDB: Periodic snapshots (backup)
+        #
+        # Recovery:
+        # - Prefer AOF (more recent)
+        # - Fallback RDB (if AOF missing)
+        #
+        # Trade-off:
+        # - Highest durability
+        # - Most overhead (both enabled)
+        # - Production recommended
+        #
+        # WHY DISABLED (appendonly no):
+        # ════════════════════════════
+        #
+        # Auth Service use case:
+        # ✅ Tokens expendable (can re-login)
+        # ✅ Performance priority (fast writes)
+        # ✅ RDB sufficient (15 min loss OK)
+        # ✅ Simple setup (one mechanism)
+        #
+        # Data loss acceptable:
+        # - Worst case: 15 min tokens lost
+        # - Users re-login (minor inconvenience)
+        # - Not financial data (low risk)
+        #
+        # Performance gain:
+        # - No fsync overhead (faster writes)
+        # - No AOF rewrite (simpler)
+        # - Less disk I/O (better throughput)
+        #
+        # Benchmarks:
+        # RDB only: 100,000 ops/sec
+        # RDB + AOF: 50,000 ops/sec (50% slower)
+        #
+        # WHEN TO ENABLE AOF:
+        # ══════════════════
+        #
+        # Production requirements:
+        # - Critical data (cannot lose)
+        # - Financial transactions
+        # - User sessions (must preserve)
+        # - Compliance (audit trail)
+        #
+        # How to enable:
+        # appendonly yes
+        # appendfilename "appendonly.aof"
+        # appendfsync everysec
+        #
+        # Recovery scenario:
+        # ═════════════════
+        # Redis crashes:
+        # - RDB only: Load dump.rdb (15 min old)
+        # - AOF: Load appendonly.aof (< 1s old)
+        # - Better: Minimal data loss
+        #
+        # Development vs Production:
+        # ═════════════════════════
+        # Development (this):
+        # - RDB only (simple)
+        # - Fast (performance)
+        # - Data loss OK
+        #
+        # Production:
+        # - RDB + AOF (durable)
+        # - Slower (acceptable)
+        # - No data loss
+        #
+        # AOF configuration (if enabled):
+        # ══════════════════════════════
+        #
+        # appendfilename "appendonly.aof"
+        # → AOF file name
+        #
+        # appendfsync everysec
+        # → Flush to disk every second
+        #
+        # Options:
+        # - always: Every write (safest, slowest)
+        # - everysec: Every second (balanced)
+        # - no: OS decides (fastest, risky)
+        #
+        # auto-aof-rewrite-percentage 100
+        # → Rewrite when 100% larger
+        #
+        # auto-aof-rewrite-min-size 64mb
+        # → Rewrite if > 64MB
+        #
+        # AOF rewrite:
+        # - AOF grows (appends forever)
+        # - Rewrite compacts (removes redundant)
+        # - Example: SET key val, SET key val2
+        # - Rewrite: SET key val2 (single command)
+        #
+        # Our config: appendonly no
+        # - RDB sufficient (Auth Service)
+        # - Enable для production (if needed)
+
+        # ════════════════════════════════════════════════════
+        # SLOW LOG
+        # ════════════════════════════════════════════════════
+        #
+        # Log slow queries (performance monitoring)
+
+        slowlog-log-slower-than 10000
+        # ═══════════════════════════════════════════════════
+        # SLOWLOG LOG SLOWER THAN
+        # ═══════════════════════════════════════════════════
+        #
+        # Log commands slower than N microseconds
+        #
+        # 10000 microseconds = 10 milliseconds = 0.01 seconds
+        #
+        # Units:
+        # - Value в microseconds (μs)
+        # - 1 second = 1,000,000 μs
+        # - 1 millisecond = 1,000 μs
+        #
+        # Examples:
+        # - 1000 μs = 1 ms (very aggressive)
+        # - 10000 μs = 10 ms (this config)
+        # - 100000 μs = 100 ms (relaxed)
+        # - 1000000 μs = 1 second (very relaxed)
+        #
+        # Special values:
+        # - 0: Log ALL commands (debug only)
+        # - -1: Disable slow log (no logging)
+        #
+        # WHY 10ms:
+        # ════════
+        # Redis performance expectations:
+        # - Simple commands (GET, SET): < 1 ms
+        # - Complex commands (SORT, ZRANGE): < 5 ms
+        # - Network latency: 1-2 ms
+        # - Total: < 10 ms (most queries)
+        #
+        # 10ms threshold:
+        # ✅ Catches truly slow queries
+        # ✅ Not too noisy (normal ops pass)
+        # ✅ Actionable (investigate > 10ms)
+        #
+        # What gets logged:
+        # ════════════════
+        # Slow commands:
+        # - Large KEYS scan (anti-pattern)
+        # - SORT large set
+        # - ZRANGE large sorted set
+        # - SMEMBERS large set
+        # - Lua scripts (complex logic)
+        #
+        # Example slow log entry:
+        # 1) (integer) 14                    # Entry ID
+        # 2) (integer) 1635724800            # Timestamp
+        # 3) (integer) 12000                 # Duration (12ms)
+        # 4) 1) "KEYS"                       # Command
+        #    2) "refresh_token:*"
+        # 5) "127.0.0.1:54321"              # Client
+        # 6) ""                              # Client name
+        #
+        # Why slow: KEYS scans all keys (O(N))
+        # Should use: SCAN (iterative, O(1) per call)
+        #
+        # Commands to watch:
+        # ═════════════════
+        #
+        # KEYS pattern:
+        # - Scans ALL keys (blocking)
+        # - O(N) complexity
+        # - Blocks other queries
+        # ❌ Never use в production
+        #
+        # Alternative:
+        # SCAN 0 MATCH refresh_token:* COUNT 100
+        # - Iterative (cursor-based)
+        # - Non-blocking
+        # - O(1) per call
+        # ✅ Production-safe
+        #
+        # SORT:
+        # - Sorts entire collection
+        # - O(N log N) complexity
+        # - Can be slow (large collections)
+        #
+        # Solution:
+        # - Sort client-side (smaller datasets)
+        # - Use ZRANGE (sorted sets, pre-sorted)
+        # - Limit results (SORT LIMIT 0 100)
+        #
+        # SMEMBERS large_set:
+        # - Returns ALL members
+        # - O(N) complexity
+        # - Blocks (large sets)
+        #
+        # Alternative:
+        # SSCAN large_set 0 COUNT 100
+        # - Iterative
+        # - Non-blocking
+        #
+        # Viewing slow log:
+        # ════════════════
+        #
+        # Get recent entries:
+        # redis-cli SLOWLOG GET 10
+        # → Last 10 slow queries
+        #
+        # Get count:
+        # redis-cli SLOWLOG LEN
+        # → Number of entries (since start або reset)
+        #
+        # Reset log:
+        # redis-cli SLOWLOG RESET
+        # → Clear all entries (fresh start)
+        #
+        # Monitoring:
+        # ══════════
+        # Check periodically:
+        # - Daily: Review slow queries
+        # - Identify patterns (which commands)
+        # - Optimize (indexes, commands)
+        #
+        # Alert on slow queries:
+        # IF slowlog_len > 100 THEN
+        #   "WARNING: Many slow queries"
+        #   "Review SLOWLOG GET 20"
+        # END IF
+        #
+        # Common fixes:
+        # ════════════
+        #
+        # Problem: KEYS pattern (O(N))
+        # Fix: Use SCAN cursor (O(1))
+        #
+        # Problem: SORT large set
+        # Fix: Use ZRANGE (sorted set)
+        #
+        # Problem: Large values (100KB+)
+        # Fix: Split into smaller keys
+        #
+        # Problem: Lua script slow
+        # Fix: Optimize algorithm, cache results
+        #
+        # Problem: Network latency
+        # Fix: Pipeline commands, connection pooling
+        #
+        # Tuning threshold:
+        # ════════════════
+        # Too low (1ms):
+        # - Many false positives
+        # - Noisy logs (hard to analyze)
+        # - Normal variations trigger
+        #
+        # Too high (1000ms):
+        # - Misses problems (only catastrophic)
+        # - Damage already done (users affected)
+        #
+        # 10ms (this):
+        # - Good balance (catches real issues)
+        # - Actionable (investigate і fix)
+        # - Standard practice
+        #
+        # Production recommendations:
+        # ═════════════════════════
+        # Development: 10ms (catch issues early)
+        # Staging: 10ms (validate performance)
+        # Production: 50ms (real issues only)
+        #
+        # Why higher в production:
+        # - Higher load (expected slowness)
+        # - Less noise (focus on real problems)
+        # - Alert threshold (not debug tool)
+
+        slowlog-max-len 128
+        # ═══════════════════════════════════════════════════
+        # SLOWLOG MAX LEN
+        # ═══════════════════════════════════════════════════
+        #
+        # Maximum number of slow log entries to keep
+        #
+        # 128 entries = last 128 slow queries
+        #
+        # How it works:
+        # ════════════
+        # Circular buffer (FIFO):
+        # 1. Log fills to 128 entries
+        # 2. New slow query occurs
+        # 3. Oldest entry discarded
+        # 4. New entry added
+        # 5. Always maintains 128 entries
+        #
+        # Memory usage:
+        # ═══════════
+        # Each entry:
+        # - Timestamp: 8 bytes
+        # - Duration: 8 bytes
+        # - Command: Variable (avg 100 bytes)
+        # - Client: 50 bytes
+        # - Total: ~200 bytes per entry
+        #
+        # 128 entries:
+        # 128 * 200 bytes = 25KB
+        # → Negligible (very small)
+        #
+        # Larger values:
+        # - 1000 entries: 200KB (still small)
+        # - 10000 entries: 2MB (reasonable)
+        #
+        # Why 128:
+        # ═══════
+        # ✅ Enough history (recent issues)
+        # ✅ Low memory (< 30KB)
+        # ✅ Fast queries (O(1) access)
+        # ✅ Standard default
+        #
+        # Typical usage:
+        # - Review last 10-20 entries (recent)
+        # - 128 covers several hours (low traffic)
+        # - Sufficient для debugging
+        #
+        # When to increase:
+        # ════════════════
+        # High traffic:
+        # - 1000 req/s → many slow queries
+        # - 128 fills quickly (minutes)
+        # - Increase to 1000+ (longer history)
+        #
+        # Analysis:
+        # - Need longer history (patterns)
+        # - Compare across days
+        # - Increase to 10000+
+        #
+        # When to decrease:
+        # ════════════════
+        # Memory constrained:
+        # - Every byte counts (rare)
+        # - Decrease to 64 або 32
+        # - Still useful (recent queries)
+        #
+        # No slow queries:
+        # - Optimized application
+        # - Decrease to 32 (rarely used)
+        #
+        # Best practice:
+        # ═════════════
+        # Don't rely on slow log alone:
+        # - Export to monitoring (Prometheus)
+        # - Alert on patterns (recurring issues)
+        # - Store historical data (trends)
+        #
+        # Example monitoring:
+        # redis_slowlog_length
+        # → Track slow query count
+        #
+        # Alert:
+        # IF slowlog_length > 50 в 5 minutes THEN
+        #   "CRITICAL: High slow query rate"
+        # END IF
+        #
+        # Our config: 128 (default)
+        # - Good balance (history vs memory)
+        # - Sufficient для debugging
+        # - Standard practice
+
+        # ════════════════════════════════════════════════════
+        # SECURITY
+        # ════════════════════════════════════════════════════
+        #
+        # Authentication і access control
+
+        # Password встановлюється через command line
+        # requirepass не вказуємо тут (plaintext)
+        # ═══════════════════════════════════════════════════
+        # PASSWORD (NOT SET HERE)
+        # ═══════════════════════════════════════════════════
+        #
+        # Password authentication
+        #
+        # WHY NOT HERE:
+        # ════════════
+        # Security issue:
+        # - ConfigMap = plain text
+        # - Visible to all (kubectl get)
+        # - Anyone з access can read
+        # - Password exposed (security breach)
+        #
+        # Bad approach:
+        # requirepass redis_password_change_me_in_prod
+        # → Password в ConfigMap (visible)
+        #
+        # Good approach (ours):
+        # Command line: --requirepass $(REDIS_PASSWORD)
+        # → Password від Secret (env var)
+        # → Not в config file
+        # → Better security
+        #
+        # Configuration:
+        # command:
+        #   - redis-server
+        #   - /usr/local/etc/redis/redis.conf
+        #   - --requirepass
+        #   - $(REDIS_PASSWORD)
+        #
+        # env:
+        #   - name: REDIS_PASSWORD
+        #     valueFrom:
+        #       secretKeyRef:
+        #         name: auth-redis-secret
+        #         key: REDIS_PASSWORD
+        #
+        # Result:
+        # Redis gets password від environment
+        # Not stored в ConfigMap (secure)
+        #
+        # Alternative secure methods:
+        # ══════════════════════════
+        #
+        # 1. ACL file (Redis 6+):
+        # ══════════════════════
+        # aclfile /etc/redis/users.acl
+        #
+        # Volume mount Secret:
+        # volumes:
+        #   - name: acl-file
+        #     secret:
+        #       secretName: redis-acl
+        #
+        # Benefits:
+        # ✅ Multiple users
+        # ✅ Different permissions
+        # ✅ Fine-grained control
+        #
+        # 2. TLS client certificates:
+        # ══════════════════════════
+        # tls-cert-file /etc/redis/tls/redis.crt
+        # tls-key-file /etc/redis/tls/redis.key
+        # tls-ca-cert-file /etc/redis/tls/ca.crt
+        #
+        # Benefits:
+        # ✅ Mutual TLS (mTLS)
+        # ✅ Certificate-based auth
+        # ✅ Encrypted transit
+        #
+        # Our choice: Password via command line
+        # - Simple (one password)
+        # - Secure (Secret, not ConfigMap)
+        # - Sufficient (single service)
+        #
+        # Security checklist:
+        # ══════════════════
+        # ✅ Password required (--requirepass)
+        # ✅ Password від Secret (not ConfigMap)
+        # ✅ bind 0.0.0.0 (accept connections)
+        # ✅ protected-mode yes (enforce auth)
+        # ✅ ClusterIP (internal only)
+        # ✅ No external exposure (secure)
+        #
+        # What we DON'T have (optional):
+        # ❌ TLS encryption (internal traffic)
+        # ❌ ACL (multiple users)
+        # ❌ Firewall rules (Network Policies)
+        #
+        # Good enough for:
+        # ✅ Development
+        # ✅ Internal services
+        # ✅ Trusted network
+        #
+        # Production additions:
+        # ✅ TLS (encrypt transit)
+        # ✅ Network Policies (firewall)
+        # ✅ ACL (if multiple services)

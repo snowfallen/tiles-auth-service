@@ -1,21 +1,155 @@
-# PostgreSQL Deployment для Auth Service
-# Single instance PostgreSQL (NOT HA)
+# ════════════════════════════════════════════════════════════════
+# POSTGRESQL DEPLOYMENT для AUTH SERVICE
+# ════════════════════════════════════════════════════════════════
+#
+# Single-instance PostgreSQL database
+#
+# ⚠️  PRODUCTION WARNING:
+# This is single-replica PostgreSQL (NOT highly available)
+#
+# For production:
+# - Use StatefulSet (not Deployment)
+# - Use Patroni або Stolon (HA PostgreSQL)
+# - Use managed database (AWS RDS, Google Cloud SQL)
+# - Use PostgreSQL Operator (Zalando, Crunchy Data)
+#
+# This config suitable для:
+# ✅ Development
+# ✅ Testing
+# ✅ Staging
+# ❌ Production (single point of failure)
 
 apiVersion: apps/v1
 kind: Deployment
+
 metadata:
   name: auth-postgres
   namespace: tiles-infra
   labels:
     app: auth-postgres
     component: database
-spec:
-  # Single replica (для HA використовуй StatefulSet + Patroni)
-  replicas: 1
+    # component=database (organizational label)
 
-  # Recreate strategy (NOT RollingUpdate для stateful)
+spec:
+  replicas: 1
+  # ═══════════════════════════════════════════════════════
+  # SINGLE REPLICA
+  # ═══════════════════════════════════════════════════════
+  #
+  # Why only 1 replica:
+  # ══════════════════
+  # PostgreSQL = stateful database
+  # Cannot simply run multiple replicas (data corruption)
+  #
+  # Multiple replicas need:
+  # - Master-replica setup (replication)
+  # - Failover mechanism (automatic promotion)
+  # - Split-brain prevention (fencing)
+  # - Shared storage або streaming replication
+  #
+  # Single replica:
+  # ✅ Simple setup
+  # ✅ Good для dev/test
+  # ❌ No high availability
+  # ❌ Downtime during updates
+  # ❌ Single point of failure
+  #
+  # HA PostgreSQL solutions:
+  # ════════════════════════
+  #
+  # StatefulSet + Patroni:
+  # - Multiple replicas (3+)
+  # - Automatic failover
+  # - Streaming replication
+  # - Distributed consensus (etcd)
+  #
+  # PostgreSQL Operator:
+  # - Zalando Postgres Operator
+  # - Crunchy Data Operator
+  # - CloudNativePG
+  # - Automated management
+  #
+  # Managed database:
+  # - AWS RDS (Multi-AZ)
+  # - Google Cloud SQL (HA)
+  # - Azure Database для PostgreSQL
+  # - No K8s management needed
+  #
+  # Why use Deployment (not StatefulSet):
+  # ════════════════════════════════════
+  # Single replica + PVC = simpler
+  # - Deployment handles restarts
+  # - PVC preserves data
+  # - Good enough для non-prod
+  #
+  # StatefulSet benefits (when multiple replicas):
+  # - Stable pod names (postgres-0, postgres-1)
+  # - Ordered scaling (sequential)
+  # - Stable storage (each pod own PVC)
+  # - Stable network (headless service)
+
   strategy:
     type: Recreate
+    # ════════════════════════════════════════════════
+    # RECREATE STRATEGY
+    # ════════════════════════════════════════════════
+    #
+    # Stop old pod, then start new pod
+    #
+    # vs RollingUpdate (used для auth-service):
+    # ═════════════════════════════════════════
+    #
+    # RollingUpdate:
+    # - Start new pod
+    # - Wait для ready
+    # - Stop old pod
+    # - Zero downtime
+    # ✅ Stateless apps
+    # ❌ Stateful apps (data conflict)
+    #
+    # Recreate:
+    # - Stop old pod first
+    # - Then start new pod
+    # - Brief downtime (~30s)
+    # ❌ Downtime
+    # ✅ Stateful apps (no conflict)
+    #
+    # WHY RECREATE для DATABASE:
+    # ═════════════════════════
+    #
+    # Data integrity:
+    # - Only one pod accesses PVC
+    # - No concurrent writes
+    # - No data corruption
+    #
+    # RollingUpdate issues (database):
+    # 1. Old pod writing to PVC
+    # 2. New pod starts, mounts same PVC
+    # 3. Both pods access same files
+    # 4. Database corruption (PostgreSQL locks)
+    #
+    # Recreate ensures:
+    # 1. Old pod stops (releases PVC)
+    # 2. Database shuts down cleanly
+    # 3. New pod starts
+    # 4. Database starts cleanly
+    # 5. No corruption
+    #
+    # Downtime duration:
+    # - Pod termination: ~10s
+    # - Pod start: ~10s
+    # - PostgreSQL startup: ~5-10s
+    # Total: ~25-30s downtime
+    #
+    # Acceptable для:
+    # ✅ Development (no users affected)
+    # ✅ Staging (planned maintenance)
+    # ✅ Low-traffic apps (brief outage OK)
+    #
+    # NOT acceptable для:
+    # ❌ Production (zero downtime needed)
+    # ❌ High-traffic apps (availability critical)
+    # → Use HA PostgreSQL instead
 
   selector:
     matchLabels:
@@ -26,70 +160,659 @@ spec:
       labels:
         app: auth-postgres
         component: database
+
     spec:
       containers:
         - name: postgres
+          # ════════════════════════════════════════
+          # CONTAINER NAME
+          # ════════════════════════════════════════
+          #
+          # postgres = main container
+          #
+          # Single container pod:
+          # - One container per pod (typical)
+          # - Dedicated database instance
+          #
+          # Sidecar patterns (advanced):
+          # - postgres (main database)
+          # - pgbouncer (connection pooling)
+          # - postgres_exporter (Prometheus metrics)
+          # - wal-g (backup/restore)
+
           image: postgres:16-alpine
+          # ═══════════════════════════════════════
+          # POSTGRESQL IMAGE
+          # ═══════════════════════════════════════
+          #
+          # Official PostgreSQL image
+          #
+          # Image components:
+          # postgres: Repository (official)
+          # 16: Major version
+          # alpine: Base image variant
+          #
+          # POSTGRESQL VERSIONS:
+          # ═══════════════════
+          # - 16: Latest (2023, current)
+          # - 15: Stable (2022)
+          # - 14: Older stable (2021)
+          # - 13: EOL soon (avoid)
+          #
+          # Version features (16):
+          # ✅ Performance improvements (SQL, queries)
+          # ✅ Logical replication improvements
+          # ✅ Better monitoring
+          # ✅ JSON improvements
+          # ✅ Security updates
+          #
+          # IMAGE VARIANTS:
+          # ══════════════
+          #
+          # postgres:16-alpine (this):
+          # ✅ Lightweight (~80MB compressed)
+          # ✅ Alpine Linux base (~5MB)
+          # ✅ Fast download
+          # ✅ Less attack surface
+          # ⚠️  musl libc (not glibc)
+          # ⚠️  Some tools missing
+          #
+          # postgres:16 (Debian-based):
+          # ✅ Full tools (psql, pg_dump, тощо)
+          # ✅ glibc (standard)
+          # ✅ More compatible
+          # ❌ Larger (~130MB compressed)
+          #
+          # postgres:16-bullseye (Debian 11):
+          # ✅ Specific Debian version
+          # ✅ Long-term support
+          # ❌ Larger size
+          #
+          # Why alpine:
+          # ✅ Smaller images → faster pulls
+          # ✅ Less storage needed
+          # ✅ Security (less packages)
+          # ✅ Good для containers
+          #
+          # When to use Debian:
+          # - Need specific tools (pg_basebackup)
+          # - Compatibility issues (extensions)
+          # - Company policy (glibc only)
+          #
+          # VERSION PINNING:
+          # ═══════════════
+          # postgres:16-alpine
+          # ✅ Major version pinned (16)
+          # ⚠️  Minor updates automatic (16.0 → 16.1)
+          #
+          # More specific:
+          # postgres:16.1-alpine3.18
+          # ✅ Exact PostgreSQL version (16.1)
+          # ✅ Exact Alpine version (3.18)
+          # ✅ Fully reproducible
+          # ⚠️  No security updates (manual)
+          #
+          # Recommendation:
+          # postgres:16-alpine (this)
+          # - Major version stable
+          # - Minor updates automatic (security)
+          # - Good balance
 
           ports:
             - containerPort: 5432
+              # ═══════════════════════════════
+              # POSTGRESQL PORT
+              # ═══════════════════════════════
+              #
+              # 5432 = PostgreSQL default port
+              #
+              # Well-known port (registered with IANA)
+              # Cannot change without reconfiguring PostgreSQL
+              #
+              # Config file:
+              # postgresql.conf:
+              # port = 5432
+              #
+              # Protocol: TCP (connection-oriented)
+              #
+              # Client connections:
+              # psql -h postgres -p 5432 -U auth_user -d auth_db
+              # jdbc:postgresql://auth-postgres:5432/auth_db
+
               name: postgres
+              # Named port (organizational)
+              # Service references: targetPort: postgres
+
               protocol: TCP
 
-          # Environment variables
           env:
+            # ════════════════════════════════════════
+            # POSTGRESQL ENVIRONMENT VARIABLES
+            # ════════════════════════════════════════
+            #
+            # PostgreSQL Docker image configuration
+            #
+            # Official variables:
+            # - POSTGRES_DB: Database name (create on start)
+            # - POSTGRES_USER: Superuser name
+            # - POSTGRES_PASSWORD: Superuser password
+            # - PGDATA: Data directory path
+            # - POSTGRES_INITDB_ARGS: initdb arguments
+            # - POSTGRES_HOST_AUTH_METHOD: Authentication method
+            #
+            # Advanced:
+            # - POSTGRES_INITDB_WALDIR: WAL directory
+            # - POSTGRES_INITDB_XLOGDIR: Transaction log dir
+            # - POSTGRESQL_CONF_*: Config overrides
+
             - name: POSTGRES_DB
+              # ═══════════════════════════════════
+              # DATABASE NAME
+              # ═══════════════════════════════════
+              #
+              # Initial database to create
+              #
+              # PostgreSQL startup:
+              # 1. Check if data directory initialized
+              # 2. If not, run initdb (initialize cluster)
+              # 3. Create database: POSTGRES_DB
+              # 4. Create user: POSTGRES_USER
+              # 5. Grant permissions
+              #
+              # SQL equivalent:
+              # CREATE DATABASE auth_db
+              #   OWNER auth_user
+              #   ENCODING 'UTF8'
+              #   LC_COLLATE 'en_US.utf8'
+              #   LC_CTYPE 'en_US.utf8';
+              #
+              # Default database:
+              # If not specified: POSTGRES_USER value
+              # If POSTGRES_USER not specified: postgres
+              #
+              # Multiple databases:
+              # Only one created automatically
+              # Create others manually або з init script
+              #
+              # Init script example:
+              # /docker-entrypoint-initdb.d/init.sql:
+              # CREATE DATABASE app_db;
+              # CREATE DATABASE analytics_db;
+
               valueFrom:
                 configMapKeyRef:
                   name: auth-postgres-config
                   key: POSTGRES_DB
+                  # Value: auth_db
+                  #
+                  # Why ConfigMap (not hardcoded):
+                  # ✅ Centralized config
+                  # ✅ Shared з application
+                  # ✅ Easy updates (one place)
+                  #
+                  # Application uses same:
+                  # SPRING_DATASOURCE_URL=jdbc:postgresql://auth-postgres:5432/auth_db
+                  #                                                              ↑
+                  #                                                         Same name
 
             - name: POSTGRES_USER
+              # ═══════════════════════════════════
+              # DATABASE USER
+              # ═══════════════════════════════════
+              #
+              # Superuser to create
+              #
+              # Default: postgres (if not specified)
+              #
+              # Our user: auth_user
+              # - Application user (not postgres)
+              # - Specific to auth service
+              # - Clear purpose (naming)
+              #
+              # Permissions:
+              # Superuser (can do anything):
+              # - CREATE DATABASE
+              # - CREATE ROLE
+              # - DROP DATABASE
+              # - Modify system tables
+              #
+              # Production consideration:
+              # ⚠️  Application shouldn't use superuser
+              # ⚠️  Create limited user (security)
+              #
+              # Better approach:
+              # 1. Use POSTGRES_USER=postgres (setup)
+              # 2. Create limited user:
+              #    CREATE USER app_user WITH PASSWORD 'xxx';
+              #    GRANT CONNECT ON DATABASE auth_db TO app_user;
+              #    GRANT USAGE ON SCHEMA public TO app_user;
+              #    GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES TO app_user;
+              # 3. Application uses app_user (not postgres)
+              #
+              # Benefits:
+              # ✅ Least privilege (security)
+              # ✅ Audit trail (know which user)
+              # ✅ Damage limitation (can't drop DB)
+
               valueFrom:
                 configMapKeyRef:
                   name: auth-postgres-config
                   key: POSTGRES_USER
+                  # Value: auth_user
 
             - name: POSTGRES_PASSWORD
+              # ═══════════════════════════════════
+              # DATABASE PASSWORD
+              # ═══════════════════════════════════
+              #
+              # Password для POSTGRES_USER
+              #
+              # CRITICAL SECURITY:
+              # ⚠️  Use Secret (not ConfigMap)
+              # ⚠️  Never hardcode
+              # ⚠️  Never commit to Git
+              # ⚠️  Rotate regularly
+              #
+              # Password requirements:
+              # - Length: 16+ characters
+              # - Complexity: Mix case, numbers, symbols
+              # - Unique: Not reused
+              # - Random: Generated (not dictionary word)
+              #
+              # Generation:
+              # openssl rand -base64 32
+              # → cN5bXYqP8F9sK3mR7tW2vJ4nL6hD9fA1gE8cB0zX=
+              #
+              # Authentication:
+              # PostgreSQL uses password для:
+              # - TCP connections (md5 або scram-sha-256)
+              # - Local connections (trust або peer)
+              #
+              # pg_hba.conf (host-based auth):
+              # # TYPE  DATABASE  USER       ADDRESS      METHOD
+              # host    all       all        0.0.0.0/0    md5
+              # local   all       postgres                peer
+              #
+              # Methods:
+              # - trust: No password (insecure!)
+              # - md5: MD5 hashed password (legacy)
+              # - scram-sha-256: Modern hashing (recommended)
+              # - peer: OS user authentication
+              # - cert: Certificate authentication
+
               valueFrom:
                 secretKeyRef:
                   name: auth-postgres-secret
                   key: POSTGRES_PASSWORD
+                  # Value: auth_password_change_me_in_prod
+                  #
+                  # ⚠️  CHANGE IN PRODUCTION!
+                  # This is example/development password
+                  #
+                  # Production password:
+                  # - Generated random (openssl rand)
+                  # - Stored securely (Sealed Secrets)
+                  # - Rotated regularly (90 days)
+                  # - Audited (access logging)
 
-            # Data directory
             - name: PGDATA
+              # ═══════════════════════════════════
+              # DATA DIRECTORY
+              # ═══════════════════════════════════
+              #
+              # Where PostgreSQL stores data files
+              #
+              # Default: /var/lib/postgresql/data
+              # Our value: /var/lib/postgresql/data/pgdata
+              #
+              # Why subdirectory:
+              # ══════════════════
+              # Kubernetes PVC behavior:
+              # - Mounts volume to directory
+              # - May contain lost+found (filesystem artifact)
+              # - PostgreSQL fails if data dir not empty
+              #
+              # Error without subdirectory:
+              # initdb: directory "/var/lib/postgresql/data" exists but is not empty
+              # If you want to create a new database system, either remove or empty
+              # the directory "/var/lib/postgresql/data" or run initdb with an argument
+              # other than "/var/lib/postgresql/data".
+              #
+              # Solution:
+              # Use subdirectory (pgdata):
+              # /var/lib/postgresql/data/        ← Volume mount
+              # /var/lib/postgresql/data/pgdata/ ← PostgreSQL data
+              #
+              # Volume mount may create:
+              # /var/lib/postgresql/data/lost+found/
+              #
+              # PostgreSQL sees:
+              # /var/lib/postgresql/data/pgdata/ (empty initially)
+              # → Can initialize successfully
+              #
+              # Directory structure:
+              # /var/lib/postgresql/data/pgdata/
+              # ├── base/           # Database files
+              # ├── global/         # Cluster-wide tables
+              # ├── pg_wal/         # Write-Ahead Log
+              # ├── pg_stat/        # Statistics files
+              # ├── pg_xact/        # Transaction commit log
+              # ├── postgresql.conf # Configuration
+              # ├── pg_hba.conf     # Host-based auth
+              # └── PG_VERSION      # Version file
+              #
+              # Permissions:
+              # Owner: postgres:postgres
+              # Mode: 0700 (rwx------)
+              # PostgreSQL requires strict permissions
+
               value: /var/lib/postgresql/data/pgdata
+              #      ↑ Volume mount              ↑ Actual data dir
 
-          # Volume mounts
           volumeMounts:
-            - name: postgres-storage
-              mountPath: /var/lib/postgresql/data
+            # ════════════════════════════════════════
+            # VOLUME MOUNTS
+            # ════════════════════════════════════════
+            #
+            # Mount persistent volume into container
 
-          # Resource limits
+            - name: postgres-storage
+              # ═══════════════════════════════════
+              # Volume Name
+              # ═══════════════════════════════════
+              #
+              # References: spec.volumes.name
+              #
+              # This name = logical reference
+              # Actual storage = PVC (defined below)
+
+              mountPath: /var/lib/postgresql/data
+              # ═══════════════════════════════════
+              # Mount Path
+              # ═══════════════════════════════════
+              #
+              # Where volume mounted в container
+              #
+              # PostgreSQL default data dir
+              # Contains PGDATA subdirectory
+              #
+              # File access:
+              # Container: /var/lib/postgresql/data/pgdata/base/
+              #            ↓ Mapped to
+              # PVC:       PersistentVolume → Disk storage
+              #
+              # Persistence:
+              # - Pod dies → Data preserved (PVC)
+              # - Pod restarts → Mounts same PVC
+              # - Data available immediately
+              #
+              # No volume:
+              # - Pod dies → Data lost (ephemeral)
+              # - Pod restarts → Empty database
+              # - Must restore від backup
+
           resources:
+            # ════════════════════════════════════════
+            # RESOURCE LIMITS
+            # ════════════════════════════════════════
+            #
+            # CPU і memory allocation для PostgreSQL
+
             requests:
               memory: "256Mi"
+              # ═══════════════════════════════════
+              # Memory Request
+              # ═══════════════════════════════════
+              #
+              # Guaranteed minimum: 256Mi
+              #
+              # PostgreSQL memory usage:
+              # - Shared buffers: ~25% (64Mi)
+              # - Work memory: Per query (4Mi)
+              # - Maintenance work mem: 64Mi
+              # - OS cache: Remaining
+              #
+              # Why 256Mi:
+              # ✅ Small database (< 100MB)
+              # ✅ Low traffic (dev/test)
+              # ✅ Few connections (< 10)
+              #
+              # Increase for:
+              # - Larger databases (1GB+ data)
+              # - More connections (100+)
+              # - Complex queries (joins, aggregates)
+              # - Better performance
+              #
+              # Production recommendation:
+              # - Small app: 512Mi-1Gi
+              # - Medium app: 1-2Gi
+              # - Large app: 4-8Gi+
+
               cpu: "250m"
+              # ═══════════════════════════════════
+              # CPU Request
+              # ═══════════════════════════════════
+              #
+              # Guaranteed minimum: 0.25 cores
+              #
+              # PostgreSQL CPU usage:
+              # - Low traffic: 50-100m
+              # - Medium traffic: 200-500m
+              # - High traffic: 500m-2cores
+              #
+              # Single-threaded queries:
+              # Each query = one CPU core max
+              # Multiple connections = parallel queries
+              #
+              # Why 250m:
+              # ✅ Handles basic queries (< 1s)
+              # ✅ Few concurrent connections
+              # ✅ Development/testing load
+              #
+              # Production recommendation:
+              # - 500m-1core (small app)
+              # - 1-2 cores (medium app)
+              # - 2-4 cores (large app)
+
             limits:
               memory: "1Gi"
+              # ═══════════════════════════════════
+              # Memory Limit
+              # ═══════════════════════════════════
+              #
+              # Maximum allowed: 1Gi
+              #
+              # 4x of request (256Mi)
+              # Allows burst capacity
+              #
+              # PostgreSQL OOM:
+              # - Reaches 1Gi limit
+              # - OOMKilled by Kubernetes
+              # - Pod restarts
+              # - Data preserved (PVC)
+              # - Queries fail during restart
+              #
+              # Prevention:
+              # ✅ Tune shared_buffers (not too large)
+              # ✅ Limit work_mem (per query)
+              # ✅ Connection pooling (PgBouncer)
+              # ✅ Query optimization (indexes)
+              #
+              # Monitoring:
+              # SELECT * FROM pg_stat_activity;
+              # → Shows memory per connection
+              #
+              # kubectl top pod auth-postgres-xxx
+              # → Shows actual usage
+
               cpu: "1000m"
+              # ═══════════════════════════════════
+              # CPU Limit
+              # ═══════════════════════════════════
+              #
+              # Maximum allowed: 1 core
+              #
+              # 4x of request (250m)
+              #
+              # PostgreSQL CPU throttling:
+              # - Heavy query (full table scan)
+              # - Uses > 1 core
+              # - Kubernetes throttles
+              # - Query slower
+              # - Not killed (unlike memory)
+              #
+              # Query performance:
+              # - Simple queries: < 100ms (< 250m)
+              # - Medium queries: 100-500ms (250-500m)
+              # - Complex queries: 500ms+ (500m-1core)
+              # - Very slow queries: Investigate (indexes?)
 
-          # Liveness probe
           livenessProbe:
-            exec:
-              command:
-                - pg_isready
-                - -U
-                - auth_user
-                - -d
-                - auth_db
-            initialDelaySeconds: 30
-            periodSeconds: 10
-            timeoutSeconds: 5
-            failureThreshold: 3
+            # ════════════════════════════════════════
+            # LIVENESS PROBE
+            # ════════════════════════════════════════
+            #
+            # "Is PostgreSQL alive?"
+            #
+            # Checks if database responsive
+            # If fails → Restart pod
 
-          # Readiness probe
+            exec:
+              # ═══════════════════════════════════
+              # Exec Probe
+              # ═══════════════════════════════════
+              #
+              # Execute command в container
+              #
+              # vs httpGet:
+              # httpGet: HTTP endpoint (web apps)
+              # exec: Shell command (databases)
+              #
+              # PostgreSQL has no HTTP endpoint
+              # Use pg_isready (PostgreSQL utility)
+
+              command:
+                # ════════════════════════════════
+                # Probe Command
+                # ════════════════════════════════
+                #
+                # pg_isready = PostgreSQL health check utility
+                #
+                # Checks:
+                # ✅ PostgreSQL process running
+                # ✅ Accepting connections
+                # ✅ Database operational
+                #
+                # Exit codes:
+                # 0 = Success (ready)
+                # 1 = Server rejecting connections
+                # 2 = No response
+                # 3 = No attempt (connection params invalid)
+                #
+                # Command format:
+                # pg_isready [options]
+                #
+                # Options:
+                # -U user: Database user
+                # -d database: Database name
+                # -h host: Host (default: localhost)
+                # -p port: Port (default: 5432)
+                # -q: Quiet (no output)
+                # -t timeout: Timeout seconds
+
+                - pg_isready
+                # Basic check (no args)
+                # Uses defaults:
+                # - host: localhost
+                # - port: 5432
+                # - user: postgres
+
+                - -U
+                - auth_user
+                # Check specific user
+                # Ensures user exists і can connect
+
+                - -d
+                - auth_db
+                # Check specific database
+                # Ensures database exists
+
+                # Complete check:
+                # pg_isready -U auth_user -d auth_db
+                #
+                # Verifies:
+                # ✅ PostgreSQL running
+                # ✅ User auth_user exists
+                # ✅ Database auth_db exists
+                # ✅ Can establish connection
+                #
+                # Example output:
+                # /var/run/postgresql:5432 - accepting connections
+                #
+                # Alternative checks:
+                # ═════════════════════
+                #
+                # psql (query database):
+                # command:
+                #   - psql
+                #   - -U
+                #   - auth_user
+                #   - -d
+                #   - auth_db
+                #   - -c
+                #   - SELECT 1
+                #
+                # More thorough (executes query)
+                # Slower (connection overhead)
+                #
+                # pg_isready (recommended):
+                # ✅ Faster (lightweight check)
+                # ✅ Less overhead
+                # ✅ Sufficient для liveness
+
+            initialDelaySeconds: 30
+            # ═══════════════════════════════════
+            # Initial Delay
+            # ═══════════════════════════════════
+            #
+            # Wait 30s before first check
+            #
+            # PostgreSQL startup:
+            # 1. Container starts (5s)
+            # 2. PostgreSQL initdb (first run: 10-20s)
+            # 3. PostgreSQL startup (5-10s)
+            # 4. Ready (total: 20-35s)
+            #
+            # Why 30s:
+            # ✅ Covers normal startup
+            # ✅ Includes initdb time (first run)
+            # ✅ Prevents premature restart
+            #
+            # Subsequent startups faster:
+            # - No initdb needed (< 10s)
+            # - Data already initialized
+
+            periodSeconds: 10
+            # Check every 10 seconds
+
+            timeoutSeconds: 5
+            # Command must complete в 5s
+            # pg_isready usually < 100ms
+
+            failureThreshold: 3
+            # 3 failures → Restart pod
+            # Total: 30s (3 * 10s)
+
           readinessProbe:
+            # ════════════════════════════════════════
+            # READINESS PROBE
+            # ════════════════════════════════════════
+            #
+            # "Is PostgreSQL ready для queries?"
+            #
+            # Same як liveness для databases
+            # Both check if database operational
+
             exec:
               command:
                 - pg_isready
@@ -97,39 +820,196 @@ spec:
                 - auth_user
                 - -d
                 - auth_db
+
             initialDelaySeconds: 10
+            # Check sooner (10s vs 30s)
+            # Readiness doesn't restart (safer)
+
             periodSeconds: 5
+            # Check more often (5s vs 10s)
+            # Faster detection (ready для traffic)
+
             timeoutSeconds: 3
+
             failureThreshold: 3
 
       volumes:
+        # ════════════════════════════════════════════
+        # POD VOLUMES
+        # ════════════════════════════════════════════
+        #
+        # Volume definitions (storage sources)
+
         - name: postgres-storage
+          # ═══════════════════════════════════════
+          # Volume Name
+          # ═══════════════════════════════════════
+          #
+          # Referenced by volumeMounts.name
+          # Logical name (local to pod)
+
           persistentVolumeClaim:
+            # ════════════════════════════════════
+            # Persistent Volume Claim
+            # ════════════════════════════════════
+            #
+            # Volume source = PVC
+            #
+            # PVC = request для storage
+            # PV = actual storage (disk)
+            #
+            # Flow:
+            # 1. Create PVC (request 5Gi)
+            # 2. K8s finds PV (5Gi available)
+            # 3. Binds PVC → PV
+            # 4. Pod mounts PVC
+            # 5. Data written to PV (disk)
+            #
+            # Persistence:
+            # - Pod deleted → PVC remains
+            # - PVC deleted → PV remains (depends on policy)
+            # - Data preserved until PVC deleted
+            #
+            # Volume types:
+            # ═════════════
+            #
+            # PersistentVolumeClaim (this):
+            # ✅ Persistent storage
+            # ✅ Survives pod restart
+            # ✅ Data preserved
+            #
+            # emptyDir:
+            # ✅ Temporary storage
+            # ❌ Deleted з pod
+            # ✅ Shared між containers
+            #
+            # hostPath:
+            # ✅ Node's filesystem
+            # ⚠️  Tied to specific node
+            # ⚠️  Data lost if node fails
+            #
+            # configMap:
+            # ✅ Configuration files
+            # ❌ Read-only
+            # ❌ Not для data
+            #
+            # secret:
+            # ✅ Sensitive files
+            # ❌ Read-only
+            # ❌ Not для data
+
             claimName: auth-postgres-pvc
+            # ═══════════════════════════════════
+            # PVC Name
+            # ═══════════════════════════════════
+            #
+            # Which PVC to mount
+            #
+            # Must exist в same namespace
+            # (tiles-infra)
+            #
+            # PVC spec (separate file):
+            # apiVersion: v1
+            # kind: PersistentVolumeClaim
+            # metadata:
+            #   name: auth-postgres-pvc
+            # spec:
+            #   accessModes:
+            #     - ReadWriteOnce
+            #   resources:
+            #     requests:
+            #       storage: 5Gi
+            #
+            # Binding:
+            # - PVC created → Pending
+            # - K8s finds PV (matching size)
+            # - Binding → Bound
+            # - Pod can mount
+            #
+            # If PVC not bound:
+            # Pod stuck в Pending state
+            # Event: "PersistentVolumeClaim not bound"
 
 ---
-# PostgreSQL Service
-# Provides stable network endpoint
+# ════════════════════════════════════════════════════════════════
+# POSTGRESQL SERVICE
+# ════════════════════════════════════════════════════════════════
+#
+# Stable network endpoint для PostgreSQL
 
 apiVersion: v1
 kind: Service
+
 metadata:
   name: auth-postgres
+  # ═══════════════════════════════════════
+  # Service Name
+  # ═══════════════════════════════════════
+  #
+  # DNS name:
+  # auth-postgres.tiles-infra.svc.cluster.local
+  #
+  # Application connects:
+  # jdbc:postgresql://auth-postgres:5432/auth_db
+  #
+  # Short form (same namespace):
+  # auth-postgres
+
   namespace: tiles-infra
+
   labels:
     app: auth-postgres
     component: database
+
 spec:
   type: ClusterIP
+  # ═══════════════════════════════════════
+  # ClusterIP
+  # ═══════════════════════════════════════
+  #
+  # Internal only (no external access)
+  #
+  # Database should NOT be exposed externally:
+  # ✅ Security (no public access)
+  # ✅ Performance (internal network)
+  # ✅ Standard practice
+  #
+  # Access від outside:
+  # - Port-forward (development):
+  #   kubectl port-forward svc/auth-postgres 5432:5432
+  #   psql -h localhost -U auth_user -d auth_db
+  #
+  # - VPN/Bastion (production):
+  #   Connect via VPN → kubectl → psql
+  #
+  # - PostgreSQL client pod:
+  #   kubectl run psql --image=postgres:16-alpine -it --rm -- psql -h auth-postgres -U auth_user -d auth_db
 
   selector:
     app: auth-postgres
+    # Matches pods з label: app=auth-postgres
 
   ports:
     - port: 5432
+      # Service port (external від Service perspective)
+
       targetPort: 5432
+      # Container port (where PostgreSQL listens)
+
       protocol: TCP
+
       name: postgres
 
-  # Sticky sessions не потрібні (single replica)
-  # sessionAffinity: None
+  # sessionAffinity: None (default)
+  # ═══════════════════════════════════
+  # No Session Affinity Needed
+  # ═══════════════════════════════════
+  #
+  # Single replica = one pod
+  # All connections go to same pod anyway
+  #
+  # If multiple replicas (HA setup):
+  # - Master handles writes
+  # - Replicas handle reads
+  # - Connection pooler (PgBouncer) routes
+  # - Still no need для sessionAffinity

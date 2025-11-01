@@ -1,19 +1,162 @@
-# Redis Deployment для Auth Service
-# Single instance Redis
+# ════════════════════════════════════════════════════════════════
+# REDIS DEPLOYMENT для AUTH SERVICE
+# ════════════════════════════════════════════════════════════════
+#
+# Single-instance Redis cache
+#
+# REDIS USE CASE:
+# ══════════════
+# Auth Service uses Redis для:
+# ✅ Refresh token storage (UUID → token data)
+# ✅ Session tracking (optional)
+# ✅ Token blacklist (logout)
+# ✅ Rate limiting (future)
+# ✅ Cache (future)
+#
+# WHY REDIS:
+# ═════════
+# ✅ In-memory (very fast, < 1ms latency)
+# ✅ Key-value store (simple API)
+# ✅ TTL support (automatic expiration)
+# ✅ Persistence options (RDB, AOF)
+# ✅ Atomic operations (INCR, EXPIRE)
+#
+# vs PostgreSQL:
+# PostgreSQL: Persistent data (users, roles)
+# Redis: Temporary data (sessions, tokens, cache)
+#
+# ⚠️  PRODUCTION WARNING:
+# Single-replica Redis (NOT highly available)
+#
+# For production:
+# - Use Redis Sentinel (HA, automatic failover)
+# - Use Redis Cluster (sharding, horizontal scaling)
+# - Use managed Redis (AWS ElastiCache, Google Memorystore)
+# - Use Redis Operator (spotahome/redis-operator)
+#
+# This config suitable для:
+# ✅ Development
+# ✅ Testing
+# ✅ Staging
+# ❌ Production (single point of failure)
 
 apiVersion: apps/v1
 kind: Deployment
+
 metadata:
   name: auth-redis
   namespace: tiles-infra
   labels:
     app: auth-redis
     component: cache
+    # component=cache (distinguishes від database)
+
 spec:
   replicas: 1
+  # ═══════════════════════════════════════════════════════
+  # SINGLE REPLICA
+  # ═══════════════════════════════════════════════════════
+  #
+  # Why only 1 replica:
+  # ══════════════════
+  # Redis = in-memory data structure store
+  # Cannot simply run multiple replicas (data inconsistency)
+  #
+  # Multiple replicas need:
+  # - Master-replica replication (async streaming)
+  # - Failover mechanism (Sentinel)
+  # - Split-brain prevention
+  # - Persistence (RDB або AOF)
+  #
+  # Single replica:
+  # ✅ Simple setup
+  # ✅ Good для dev/test
+  # ❌ No high availability
+  # ❌ Downtime during updates
+  # ❌ Single point of failure
+  # ⚠️  Data loss if pod crashes (with emptyDir)
+  #
+  # HA Redis solutions:
+  # ═══════════════════
+  #
+  # Redis Sentinel (recommended):
+  # - 1 master + 2+ replicas
+  # - Sentinel monitors health
+  # - Automatic failover (promotes replica)
+  # - Client-side discovery
+  #
+  # Architecture:
+  # Master (writes) → Replica 1 (reads)
+  #                 → Replica 2 (reads)
+  # Sentinels: S1, S2, S3 (quorum)
+  #
+  # Failover:
+  # 1. Master dies
+  # 2. Sentinels detect (quorum agreement)
+  # 3. Promote replica to master
+  # 4. Reconfigure other replicas
+  # 5. Update clients (new master endpoint)
+  #
+  # Redis Cluster:
+  # - Multiple masters (sharding)
+  # - Data partitioned (hash slots)
+  # - Horizontal scaling
+  # - Higher complexity
+  #
+  # Managed Redis:
+  # - AWS ElastiCache (Redis compatible)
+  # - Google Cloud Memorystore
+  # - Azure Cache для Redis
+  # - No K8s management needed
+  #
+  # Token storage implications:
+  # ═══════════════════════════
+  # Single replica + emptyDir:
+  # - Pod restarts → All tokens lost
+  # - Users must re-login
+  # - Acceptable для development
+  # - NOT acceptable для production
+  #
+  # Solutions:
+  # 1. Use PVC (persistent storage)
+  # 2. Use Redis Sentinel (HA)
+  # 3. Accept token loss (short TTL)
+  # 4. Hybrid: Tokens в DB + Redis cache
 
   strategy:
     type: Recreate
+    # ════════════════════════════════════════════════
+    # RECREATE STRATEGY
+    # ════════════════════════════════════════════════
+    #
+    # Same як PostgreSQL (stateful)
+    #
+    # Why Recreate:
+    # ═══════════
+    # Data integrity:
+    # - Only one pod accesses data
+    # - No concurrent access (if using PVC)
+    # - Clean shutdown/startup
+    #
+    # RollingUpdate issues:
+    # - Old pod writing to Redis
+    # - New pod starts, different state
+    # - Potential conflicts
+    #
+    # Downtime:
+    # - Pod termination: ~5s (Redis saves RDB)
+    # - Pod start: ~5s (Redis loads RDB)
+    # Total: ~10s downtime
+    #
+    # Impact:
+    # - Token validation fails (10s)
+    # - Users get 401 errors
+    # - Auto-retry succeeds (after new pod ready)
+    #
+    # Acceptable для:
+    # ✅ Development (no users affected)
+    # ✅ Off-hours deployments
+    # ❌ Production (use HA Redis)
 
   selector:
     matchLabels:
@@ -24,108 +167,959 @@ spec:
       labels:
         app: auth-redis
         component: cache
+
     spec:
       containers:
         - name: redis
           image: redis:7-alpine
+          # ═══════════════════════════════════════
+          # REDIS IMAGE
+          # ═══════════════════════════════════════
+          #
+          # Official Redis image
+          #
+          # Version: 7 (latest stable)
+          # - Released: 2022
+          # - Redis Functions (Lua scripts v2)
+          # - ACL improvements (user management)
+          # - Performance improvements
+          # - Better memory efficiency
+          #
+          # Variant: alpine
+          # - Lightweight (~15MB compressed)
+          # - Alpine Linux base
+          # - Fast download
+          # - Production-ready
+          #
+          # Alternative variants:
+          # redis:7 (Debian-based, ~40MB)
+          # redis:7-bullseye (specific Debian version)
+          #
+          # Why alpine:
+          # ✅ Smaller image (faster pulls)
+          # ✅ Less attack surface
+          # ✅ Good для containers
+          #
+          # Redis versions:
+          # - 7.x: Latest (recommended)
+          # - 6.x: Stable (older)
+          # - 5.x: Legacy (avoid)
 
-          # Command з password
           command:
+            # ════════════════════════════════════════
+            # REDIS STARTUP COMMAND
+            # ════════════════════════════════════════
+            #
+            # Custom command (overrides Docker ENTRYPOINT)
+            #
+            # Default Redis command:
+            # redis-server
+            #
+            # Our command:
+            # redis-server /usr/local/etc/redis/redis.conf --requirepass $(REDIS_PASSWORD)
+            #
+            # Components:
+            # - redis-server: Redis executable
+            # - /usr/local/etc/redis/redis.conf: Config file
+            # - --requirepass $(REDIS_PASSWORD): Password auth
+            #
+            # WHY CUSTOM COMMAND:
+            # ══════════════════
+            # Password security:
+            # - ConfigMap = plain text (not secure)
+            # - Secret = base64 (still visible в config)
+            # - Environment variable = better (not в files)
+            #
+            # Bad approach (ConfigMap):
+            # redis.conf:
+            # requirepass redis_password_change_me_in_prod
+            # → Password visible в ConfigMap
+            # → Anyone з kubectl access can read
+            #
+            # Good approach (command line):
+            # --requirepass $(REDIS_PASSWORD)
+            # → Password від Secret (env var)
+            # → Not в config file
+            # → Better security
+
             - redis-server
+              # Redis server executable
+            # Starts Redis instance
+
             - /usr/local/etc/redis/redis.conf
+              # ═══════════════════════════════════
+              # Config File Path
+              # ═══════════════════════════════════
+              #
+              # Redis configuration file
+              #
+              # Location: /usr/local/etc/redis/redis.conf
+              # Source: ConfigMap (mounted)
+              #
+              # volumeMounts:
+              # - name: redis-config
+              #   mountPath: /usr/local/etc/redis
+              #
+              # volumes:
+              # - name: redis-config
+              #   configMap:
+              #     name: auth-redis-config
+              #
+              # File created:
+              # /usr/local/etc/redis/redis.conf
+              # (від ConfigMap data.redis.conf)
+              #
+              # Config precedence:
+              # 1. Command line args (highest)
+              # 2. Config file (this)
+              # 3. Defaults (lowest)
+              #
+              # Our precedence:
+              # --requirepass $(REDIS_PASSWORD) overrides config
+              # → Command line wins (password від Secret)
+              #
+              # Without config file:
+              # redis-server --requirepass xxx --maxmemory 256mb ...
+              # → Too many flags (messy)
+            # → Config file cleaner
+
             - --requirepass
             - $(REDIS_PASSWORD)
+              # ═══════════════════════════════════
+              # Password Authentication
+              # ═══════════════════════════════════
+              #
+              # --requirepass: Enable password auth
+              # $(REDIS_PASSWORD): Env var expansion
+              #
+              # Environment variable:
+              # env:
+              #   - name: REDIS_PASSWORD
+              #     valueFrom:
+              #       secretKeyRef:
+              #         name: auth-redis-secret
+              #         key: REDIS_PASSWORD
+              #
+              # Shell expands:
+              # $(REDIS_PASSWORD) → redis_password_change_me_in_prod
+              #
+              # Redis receives:
+              # redis-server redis.conf --requirepass redis_password_change_me_in_prod
+              #
+              # Authentication:
+              # ══════════════
+              # Redis command:
+              # AUTH password
+              #
+              # Client connection:
+              # redis-cli -a password
+              # redis-cli -h host -p 6379 -a password
+              #
+              # Application connection:
+              # spring.data.redis.password=${REDIS_PASSWORD}
+              #
+              # Jedis/Lettuce (Java):
+              # RedisStandaloneConfiguration config = new RedisStandaloneConfiguration();
+              # config.setHostName("auth-redis");
+              # config.setPort(6379);
+              # config.setPassword(RedisPassword.of(password));
+              #
+              # WHY PASSWORD AUTH:
+              # ════════════════
+              # Redis has no built-in users (before Redis 6 ACL)
+              # Single password protects entire instance
+              #
+              # Without password:
+              # - Anyone can connect
+              # - Full access (read/write/delete)
+              # - Security risk (data exposure)
+              #
+              # With password:
+              # ✅ Authentication required
+              # ✅ Prevents unauthorized access
+              # ✅ Still simple (single password)
+              #
+              # Redis 6+ ACL (advanced):
+              # ════════════════════════
+              # Multiple users з different permissions
+              #
+              # Create users:
+              # ACL SETUSER app_user on >password ~* &* +@all
+              # ACL SETUSER readonly on >password ~* &* +@read
+              #
+              # Permissions:
+              # - on/off: Enable/disable user
+              # - >password: Set password
+              # - ~*: Key patterns (all keys)
+              # - &*: Pub/Sub channels
+              # - +@all: All commands
+              # - +@read: Read commands only
+              #
+              # Benefits:
+              # ✅ Least privilege (readonly user)
+              # ✅ Audit trail (track actions)
+              # ✅ Fine-grained control
+              #
+              # Our config: Simple password
+              # - Development/testing
+              # - Single service (Auth Service)
+              # - ACL overkill
+              #
+              # Production: Consider ACL
+              # - Multiple services
+              # - Different permissions
+              # - Better security
+              #
+              # SECURITY CONSIDERATIONS:
+              # ═══════════════════════
+              # Password strength:
+              # ✅ Same як PostgreSQL (16+ chars, random)
+              # ✅ Rotate regularly (90 days)
+              # ✅ Never commit to Git
+              #
+              # Network security:
+              # - ClusterIP (internal only)
+              # - No external exposure
+              # - Network policies (optional)
+              #
+              # Alternative auth:
+              # - TLS client certificates
+              # - Kubernetes RBAC (service accounts)
+            # - mTLS (mutual TLS)
 
           ports:
             - containerPort: 6379
+              # ═══════════════════════════════════
+              # REDIS PORT
+              # ═══════════════════════════════════
+              #
+              # 6379 = Redis default port
+              #
+              # Well-known port (registered with IANA)
+              # Used by всі Redis clients
+              #
+              # Protocol: RESP (Redis Serialization Protocol)
+              # - Text-based (human-readable)
+              # - Simple (easy to debug)
+              # - Fast (binary-safe)
+              #
+              # Commands via TCP:
+              # Client → Redis:
+              # *3\r\n$3\r\nSET\r\n$3\r\nkey\r\n$5\r\nvalue\r\n
+              #
+              # Redis → Client:
+              # +OK\r\n
+              #
+              # Multiple ports (advanced):
+              # - 6379: Normal connections
+              # - 16379: Cluster bus (Redis Cluster)
+              # - 26379: Sentinel (monitoring)
+
               name: redis
+              # Named port (organizational)
+
               protocol: TCP
 
-          # Environment variables
           env:
+            # ════════════════════════════════════════
+            # ENVIRONMENT VARIABLES
+            # ════════════════════════════════════════
+
             - name: REDIS_PASSWORD
+              # ═══════════════════════════════════
+              # Redis Password
+              # ═══════════════════════════════════
+              #
+              # Used в command line (--requirepass)
+              #
+              # Security:
+              # ⚠️  Visible в pod env (kubectl exec)
+              # ⚠️  Better than config file (still not perfect)
+              # ✅  Not в logs (command expansion)
+              #
+              # Check env vars:
+              # kubectl exec -it auth-redis-xxx -- env | grep REDIS
+              # → Shows REDIS_PASSWORD (plain text)
+              #
+              # Alternative (more secure):
+              # Mount Secret as file:
+              # volumeMounts:
+              #   - name: redis-password
+              #     mountPath: /run/secrets/redis
+              # volumes:
+              #   - name: redis-password
+              #     secret:
+              #       secretName: auth-redis-secret
+              #       items:
+              #       - key: REDIS_PASSWORD
+              #         path: password
+              #
+              # Command:
+              # - sh
+              # - -c
+              # - redis-server redis.conf --requirepass $(cat /run/secrets/redis/password)
+              #
+              # Benefits:
+              # ✅ Password not в env vars
+              # ✅ Only в filesystem (permissions)
+              # ✅ Better security
+
               valueFrom:
                 secretKeyRef:
                   name: auth-redis-secret
                   key: REDIS_PASSWORD
+                  # Value: redis_password_change_me_in_prod
 
-          # Volume mounts
           volumeMounts:
-            # Config file
+            # ════════════════════════════════════════
+            # VOLUME MOUNTS
+            # ════════════════════════════════════════
+
             - name: redis-config
+              # ═══════════════════════════════════
+              # Config Volume
+              # ═══════════════════════════════════
+              #
+              # ConfigMap mounted as files
+              #
+              # Source: ConfigMap (auth-redis-config)
+              # Destination: /usr/local/etc/redis/
+              #
+              # Files created:
+              # /usr/local/etc/redis/redis.conf
+              # (від ConfigMap data.redis.conf)
+              #
+              # Redis reads:
+              # redis-server /usr/local/etc/redis/redis.conf
+
               mountPath: /usr/local/etc/redis
+              # Config directory
+
               readOnly: true
+              # ═══════════════════════════════════
+              # Read-Only Mount
+              # ═══════════════════════════════════
+              #
+              # Config should not be modified
+              #
+              # Why read-only:
+              # ✅ Prevents accidental changes
+              # ✅ Config від ConfigMap (immutable source)
+              # ✅ Security (no tampering)
+              #
+              # Redis can still write logs/data
+              # (different directories)
 
-            # Data directory
             - name: redis-data
-              mountPath: /data
+              # ═══════════════════════════════════
+              # Data Volume
+              # ═══════════════════════════════════
+              #
+              # Persistent storage для Redis data
+              #
+              # Source: emptyDir (temporary)
+              # Alternative: PVC (persistent)
+              #
+              # emptyDir (current config):
+              # - Created when pod starts
+              # - Deleted when pod deleted
+              # - Lost на pod restart
+              # - No persistence
+              #
+              # Why emptyDir:
+              # ✅ Development/testing
+              # ✅ Cache data (can rebuild)
+              # ✅ Tokens (short TTL, re-login OK)
+              # ✅ Simple (no PVC management)
+              #
+              # ⚠️  DATA LOSS:
+              # Pod crashes → Data lost
+              # Pod restarts → Data lost
+              # Deployment update → Data lost
+              #
+              # Impact:
+              # - All refresh tokens lost
+              # - Users must re-login
+              # - Sessions lost
+              #
+              # Acceptable for:
+              # ✅ Development (no real users)
+              # ✅ Short-lived tokens (15 min)
+              # ✅ Cache (can rebuild)
+              #
+              # NOT acceptable for:
+              # ❌ Production (users affected)
+              # ❌ Long-lived tokens (7 days)
+              # ❌ Critical data
+              #
+              # PRODUCTION: USE PVC
+              # ══════════════════
+              # volumes:
+              #   - name: redis-data
+              #     persistentVolumeClaim:
+              #       claimName: auth-redis-pvc
+              #
+              # PersistentVolumeClaim:
+              # apiVersion: v1
+              # kind: PersistentVolumeClaim
+              # metadata:
+              #   name: auth-redis-pvc
+              # spec:
+              #   accessModes:
+              #     - ReadWriteOnce
+              #   resources:
+              #     requests:
+              #       storage: 5Gi
+              #
+              # Benefits:
+              # ✅ Data survives pod restarts
+              # ✅ RDB snapshots preserved
+              # ✅ No token loss
+              # ✅ Better user experience
+              #
+              # Redis persistence:
+              # ═════════════════
+              # RDB (snapshotting):
+              # - Periodic snapshots (save 900 1)
+              # - Point-in-time backup
+              # - Fast recovery (load RDB)
+              # - Data loss possible (last snapshot)
+              #
+              # AOF (append-only file):
+              # - Every write logged
+              # - Durable (minimal data loss)
+              # - Slower recovery (replay log)
+              # - Larger file size
+              #
+              # Our config: RDB only (performance)
+              # - Snapshots every 15 min (if changes)
+              # - Good balance (speed vs durability)
+              # - Acceptable data loss (tokens)
+              #
+              # Production: RDB + AOF (both)
+              # - Best durability
+              # - Minimal data loss
+              # - Higher overhead
 
-          # Resource limits
+              mountPath: /data
+              # ═══════════════════════════════════
+              # Data Directory
+              # ═══════════════════════════════════
+              #
+              # Redis data files location
+              #
+              # /data (default):
+              # - RDB file: /data/dump.rdb
+              # - AOF file: /data/appendonly.aof
+              #
+              # Config references:
+              # dir /data
+              # dbfilename dump.rdb
+              #
+              # Persistence workflow:
+              # 1. Redis writes to memory (always)
+              # 2. Background save (BGSAVE)
+              # 3. Writes dump.rdb to /data/
+              # 4. Pod restarts
+              # 5. Redis loads dump.rdb від /data/
+              # 6. Data restored
+              #
+              # emptyDir: /data wiped on pod restart
+              # PVC: /data preserved across restarts
+
           resources:
+            # ════════════════════════════════════════
+            # RESOURCE LIMITS
+            # ════════════════════════════════════════
+            #
+            # CRITICAL для Redis (in-memory database)
+            #
+            # Redis memory model:
+            # ═════════════════
+            # All data в memory (RAM)
+            # No spilling to disk (except persistence)
+            #
+            # Memory usage:
+            # - Keys і values (actual data)
+            # - Overhead (metadata, ~2x actual data)
+            # - Fragmentation (~10-20%)
+            # - Replication buffer (if replica)
+            # - Persistence (RDB/AOF overhead)
+            #
+            # Example:
+            # Actual data: 100MB
+            # Overhead: 100MB (2x)
+            # Fragmentation: 20MB (10%)
+            # Total: ~220MB
+            #
+            # OOM behavior:
+            # ════════════
+            # If memory exceeds maxmemory:
+            # - Eviction policy triggers (allkeys-lru)
+            # - Least recently used keys deleted
+            # - Space freed
+            # - New data written
+            #
+            # If memory exceeds K8s limit:
+            # - OOMKilled (pod killed)
+            # - Pod restarts
+            # - Data lost (if emptyDir)
+            #
+            # Prevention:
+            # maxmemory (Redis config) < limits (K8s)
+            # 256mb < 256Mi (match exactly)
+
             requests:
               memory: "128Mi"
+              # ═══════════════════════════════════
+              # Memory Request
+              # ═══════════════════════════════════
+              #
+              # Guaranteed minimum: 128Mi
+              #
+              # Token storage estimation:
+              # ═══════════════════════════
+              # Refresh token structure:
+              # {
+              #   "userId": "550e8400-...",
+              #   "username": "admin",
+              #   "issuedAt": 1635724800000,
+              #   "expiresAt": 1636329600000
+              # }
+              # Size: ~200 bytes (JSON)
+              #
+              # Token key: UUID (36 chars)
+              # Token value: JSON (~200 bytes)
+              # Redis overhead: ~100 bytes per key
+              # Total per token: ~300 bytes
+              #
+              # Capacity:
+              # 1000 users: 300KB
+              # 10,000 users: 3MB
+              # 100,000 users: 30MB
+              #
+              # Our app (small):
+              # - 1000 users max
+              # - 2 tokens per user (access + refresh)
+              # - Total: 2000 tokens * 300 bytes = 600KB
+              #
+              # Memory allocation:
+              # - Data: 1MB (tokens)
+              # - Overhead: 2MB (Redis metadata)
+              # - Fragmentation: 1MB (10%)
+              # - Buffer: 4MB (safety)
+              # Total: ~8MB
+              #
+              # Why 128Mi:
+              # ✅ 16x current need (plenty room)
+              # ✅ Allows growth (10k users)
+              # ✅ Buffer для fragmentation
+              #
+              # Production sizing:
+              # - Small (< 10k users): 256Mi
+              # - Medium (< 100k users): 512Mi-1Gi
+              # - Large (< 1M users): 2-4Gi
+              # - Very large: Sharding needed
+
               cpu: "100m"
+              # ═══════════════════════════════════
+              # CPU Request
+              # ═══════════════════════════════════
+              #
+              # Guaranteed minimum: 0.1 cores
+              #
+              # Redis CPU characteristics:
+              # - Single-threaded (one core max per operation)
+              # - Very fast (in-memory, < 1ms)
+              # - Low CPU usage (mostly memory ops)
+              #
+              # CPU usage:
+              # - Simple operations (GET, SET): < 10m
+              # - Complex operations (ZRANGE, SORT): 50-100m
+              # - Background tasks (BGSAVE, AOF rewrite): 100-200m
+              #
+              # Why 100m:
+              # ✅ Enough для basic ops (< 10k req/s)
+              # ✅ Buffer для background tasks
+              # ✅ Low usage (Redis efficient)
+              #
+              # Production:
+              # - 200-500m (higher traffic)
+              # - 1 core max (single-threaded limit)
+
             limits:
-              memory: "256Mi"  # Matches maxmemory в config
+              memory: "256Mi"
+              # ═══════════════════════════════════
+              # Memory Limit
+              # ═══════════════════════════════════
+              #
+              # Maximum: 256Mi
+              #
+              # MUST MATCH maxmemory (Redis config):
+              # redis.conf: maxmemory 256mb
+              # K8s: limits.memory: "256Mi"
+              #
+              # 256Mi = 268,435,456 bytes
+              # 256mb = 256,000,000 bytes
+              # Difference: ~8MB (close enough)
+              #
+              # Why match:
+              # ═════════
+              # Redis evicts before K8s kills
+              #
+              # Scenario 1 (matched):
+              # 1. Memory reaches 256MB
+              # 2. Redis eviction (allkeys-lru)
+              # 3. Frees space
+              # 4. Continues working ✅
+              #
+              # Scenario 2 (mismatched):
+              # maxmemory=512mb, K8s limit=256Mi
+              # 1. Memory reaches 256Mi (K8s limit)
+              # 2. Redis hasn't evicted (below 512mb)
+              # 3. OOMKilled (pod killed) ❌
+              # 4. Pod restarts
+              # 5. Data lost
+              #
+              # Best practice:
+              # maxmemory = limits - 10%
+              # → 256Mi limit, 230mb maxmemory
+              # → Buffer для overhead
+              #
+              # Our config: Equal (simplicity)
+              # → OK для development
+              # → Production: Add buffer
+              #
+              # Monitoring:
+              # INFO memory
+              # → used_memory
+              # → used_memory_peak
+              # → mem_fragmentation_ratio
+              #
+              # kubectl top pod auth-redis-xxx
+              # → Actual usage
+
               cpu: "500m"
+              # ═══════════════════════════════════
+              # CPU Limit
+              # ═══════════════════════════════════
+              #
+              # Maximum: 0.5 cores
+              #
+              # 5x request (100m)
+              # Allows burst capacity
+              #
+              # Redis rarely uses > 1 core
+              # Single-threaded architecture
+              #
+              # CPU intensive operations:
+              # - BGSAVE (fork + write RDB)
+              # - AOF rewrite (background)
+              # - Complex queries (SORT, ZRANGE large sets)
+              #
+              # Why 500m:
+              # ✅ Enough для background tasks
+              # ✅ Handles bursts
+              # ✅ Not wasteful (Redis efficient)
+              #
+              # If CPU throttled:
+              # - Operations slower
+              # - Higher latency
+              # - Not killed (unlike memory)
 
-          # Liveness probe
           livenessProbe:
-            exec:
-              command:
-                - redis-cli
-                - -a
-                - $(REDIS_PASSWORD)
-                - ping
-            initialDelaySeconds: 30
-            periodSeconds: 10
-            timeoutSeconds: 5
-            failureThreshold: 3
+            # ════════════════════════════════════════
+            # LIVENESS PROBE
+            # ════════════════════════════════════════
+            #
+            # "Is Redis alive?"
+            #
+            # Checks if Redis responsive
+            # If fails → Restart pod
 
-          # Readiness probe
+            exec:
+              command:
+                # ════════════════════════════════
+                # PING Command
+                # ════════════════════════════════
+                #
+                # redis-cli: Redis command-line client
+                # -a: Password authentication
+                # ping: Health check command
+                #
+                # Redis PING:
+                # Client → PING
+                # Redis → PONG
+                #
+                # Exit codes:
+                # 0: Success (PONG received)
+                # 1: Failure (no response, wrong password)
+                #
+                # Alternative checks:
+                # ═══════════════════
+                #
+                # INFO (more thorough):
+                # command:
+                #   - redis-cli
+                #   - -a
+                #   - $(REDIS_PASSWORD)
+                #   - info
+                #   - server
+                #
+                # Returns detailed info:
+                # redis_version:7.0.5
+                # redis_mode:standalone
+                # uptime_in_seconds:12345
+                #
+                # SET/GET (validates operations):
+                # command:
+                #   - sh
+                #   - -c
+                #   - |
+                #     redis-cli -a $REDIS_PASSWORD set __health__ ok
+                #     redis-cli -a $REDIS_PASSWORD get __health__
+                #
+                # Verifies:
+                # ✅ Can write (SET)
+                # ✅ Can read (GET)
+                # ✅ Full functionality
+                #
+                # PING sufficient:
+                # ✅ Fast (< 1ms)
+                # ✅ Low overhead
+                # ✅ Reliable indicator
+
+                - redis-cli
+                - -a
+                - $(REDIS_PASSWORD)
+                # Password від env var
+                #
+                # ⚠️  Password visible в process list:
+                # ps aux | grep redis-cli
+                # → redis-cli -a redis_password_change_me_in_prod ping
+                #
+                # Better (hide password):
+                # command:
+                #   - sh
+                #   - -c
+                #   - redis-cli -a "$REDIS_PASSWORD" ping
+                #
+                # Shell doesn't expand в process list
+                #
+                # Best (no password в command):
+                # Create .redisclirc:
+                # echo "$REDIS_PASSWORD" > /root/.redisclirc
+                # redis-cli ping
+                #
+                # But requires init step (complex)
+
+                - ping
+
+            initialDelaySeconds: 30
+            # Wait 30s before first check
+            #
+            # Redis startup:
+            # 1. Container starts (2s)
+            # 2. Redis loads RDB (5-10s if exists)
+            # 3. Redis ready (< 1s)
+            # Total: ~10-15s
+            #
+            # Why 30s:
+            # ✅ Covers RDB loading (large datasets)
+            # ✅ Safe margin
+            # ✅ Prevents premature restart
+
+            periodSeconds: 10
+            # Check every 10 seconds
+
+            timeoutSeconds: 5
+            # Command must complete в 5s
+            # PING usually < 10ms
+
+            failureThreshold: 3
+            # 3 failures → Restart pod
+            # Total: 30s (3 * 10s)
+
           readinessProbe:
+            # ════════════════════════════════════════
+            # READINESS PROBE
+            # ════════════════════════════════════════
+            #
+            # "Is Redis ready для traffic?"
+            #
+            # Same як liveness для Redis
+            # Both check operational state
+
             exec:
               command:
                 - redis-cli
                 - -a
                 - $(REDIS_PASSWORD)
                 - ping
+
             initialDelaySeconds: 5
+            # Check sooner (5s vs 30s)
+            # Readiness doesn't restart (safer)
+
             periodSeconds: 5
+            # Check more often (5s vs 10s)
+            # Faster traffic routing
+
             timeoutSeconds: 3
+
             failureThreshold: 3
 
       volumes:
-        # ConfigMap з redis.conf
+        # ════════════════════════════════════════════
+        # POD VOLUMES
+        # ════════════════════════════════════════════
+
         - name: redis-config
+          # ═══════════════════════════════════════
+          # Config Volume (ConfigMap)
+          # ═══════════════════════════════════════
+          #
+          # ConfigMap mounted as files
+          #
+          # Source: auth-redis-config ConfigMap
+          # Contains: redis.conf
+
           configMap:
             name: auth-redis-config
+            # ConfigMap name: auth-redis-config
+            #
+            # data:
+            #   redis.conf: |
+            #     bind 0.0.0.0
+            #     port 6379
+            #     ...
+            #
+            # Mounted to: /usr/local/etc/redis/
+            # Creates: /usr/local/etc/redis/redis.conf
 
-        # Data volume
-        # emptyDir для dev (втрачається при Pod restart)
-        # Для production використовуй PVC
         - name: redis-data
+          # ═══════════════════════════════════════
+          # Data Volume (emptyDir)
+          # ═══════════════════════════════════════
+          #
+          # Temporary storage (lost на pod restart)
+
           emptyDir: {}
+          # ═══════════════════════════════════
+          # EMPTY DIR
+          # ═══════════════════════════════════
+          #
+          # Temporary directory (pod lifetime)
+          #
+          # Lifecycle:
+          # - Created: Pod starts
+          # - Exists: Pod running
+          # - Deleted: Pod deleted
+          #
+          # Persistence:
+          # ❌ Pod restart → Data lost
+          # ❌ Pod reschedule → Data lost
+          # ❌ Node failure → Data lost
+          #
+          # Location:
+          # Node filesystem: /var/lib/kubelet/pods/<pod-id>/volumes/kubernetes.io~empty-dir/redis-data
+          #
+          # Size:
+          # Limited by node disk space
+          # No size limit (unless sizeLimit set)
+          #
+          # emptyDir options:
+          # ═════════════════
+          #
+          # Default (disk):
+          # emptyDir: {}
+          #
+          # Memory-backed (tmpfs):
+          # emptyDir:
+          #   medium: Memory
+          #   sizeLimit: 256Mi
+          #
+          # Behavior:
+          # - Uses RAM (not disk)
+          # - Very fast (memory speed)
+          # - Counts toward memory limit
+          # - Lost на pod restart
+          #
+          # Use cases:
+          # - Temporary cache (rebuilt)
+          # - Scratch space (disposable)
+          # - Shared між containers (sidecar pattern)
+          #
+          # Redis + emptyDir:
+          # ════════════════
+          # Acceptable:
+          # ✅ Development (no real users)
+          # ✅ CI/CD (test environments)
+          # ✅ Cache (rebuilds від source)
+          # ✅ Short-lived data (< 1 hour)
+          #
+          # NOT acceptable:
+          # ❌ Production (users affected)
+          # ❌ Session storage (user logged out)
+          # ❌ Important data (no backups)
+          #
+          # PRODUCTION: REPLACE з PVC
+          # ═════════════════════════
+          # - name: redis-data
+          #   persistentVolumeClaim:
+          #     claimName: auth-redis-pvc
+          #
+          # Benefits:
+          # ✅ Data survives restarts
+          # ✅ RDB loaded на startup
+          # ✅ No user impact
+          # ✅ Better reliability
+          #
+          # Trade-offs:
+          # ⚠️  Slower (disk vs memory)
+          # ⚠️  Cost (storage charges)
+          # ⚠️  Management (PVC lifecycle)
 
 ---
-# Redis Service
+# ════════════════════════════════════════════════════════════════
+# REDIS SERVICE
+# ════════════════════════════════════════════════════════════════
 
 apiVersion: v1
 kind: Service
+
 metadata:
   name: auth-redis
+  # Service name: auth-redis
+  #
+  # DNS: auth-redis.tiles-infra.svc.cluster.local
+  #
+  # Application connects:
+  # spring.data.redis.host=auth-redis
+  # spring.data.redis.port=6379
+
   namespace: tiles-infra
+
   labels:
     app: auth-redis
     component: cache
+
 spec:
   type: ClusterIP
+  # Internal only (same як PostgreSQL)
+  # Redis should NOT be exposed externally
 
   selector:
     app: auth-redis
+    # Matches pods з label: app=auth-redis
 
   ports:
     - port: 6379
+      # Service port (clients connect)
+
       targetPort: 6379
+      # Container port (Redis listens)
+
       protocol: TCP
+
       name: redis
